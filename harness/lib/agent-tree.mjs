@@ -248,7 +248,17 @@ export function snapshot(cwd, only = null, options = {}) {
       else tree.agents.push({ id: `pid:${p.pid}`, cli, type: 'session', parent: null, parentKnown: true, source: 'process', status: 'running', pid: p.pid, lastEvent: null, children: [] })
     }
     const now = options.now ?? Date.now()
-    const flat = tree.agents.filter(node => node.source === 'process' || node.status === 'running' || (node.status === 'stopped' ? now - node.lastAt <= 300000 : now - node.lastAt <= 900000)); tree.agents = []
+    const flat = tree.agents.filter(node => node.source === 'process' || node.status === 'running' || (node.status === 'stopped' ? now - node.lastAt <= 300000 : now - node.lastAt <= 900000))
+    const retained = new Set(flat)
+    let addedParent = true
+    while (addedParent) {
+      addedParent = false
+      for (const node of [...retained]) {
+        const parent = node.parent && tree.agents.find(candidate => candidate.cli === node.cli && candidate.id === node.parent)
+        if (parent && !retained.has(parent)) { retained.add(parent); addedParent = true }
+      }
+    }
+    flat.push(...tree.agents.filter(node => retained.has(node) && !flat.includes(node))); tree.agents = []
     for (const node of flat) {
       const parent = node.parent && flat.find(x => x.cli === node.cli && x.id === node.parent)
       if (parent) { parent.children.push(node); node.parentKnown = true }
