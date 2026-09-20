@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { repo, worktree, run, cleanup, root, tool } from './helpers.mjs'
-import { checkGitVersion } from '../harness/lib/agent-tree.mjs'
+import { checkGitVersion, render } from '../harness/lib/agent-tree.mjs'
 
 test('installs in current and future worktrees while preserving hooks', () => {
   const main = repo(), old = worktree(main, 'old')
@@ -34,12 +34,31 @@ test('event snapshot and filters keep uncertain parents explicit', () => {
   const main = repo()
   try {
     assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
-    const event = { cwd: main, session_id: 'root', agent_id: 'child', agent_type: 'worker' }
+    const event = { cwd: main, session_id: 'root', agent_id: 'child', agent_type: 'worker', model: 'gpt-5.6', effort: 'medium' }
     spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStart', 'codex'], { cwd: main, input: JSON.stringify(event) })
     const data = JSON.parse(run(tool('agent-tree'), ['--json', '--codex'], main).stdout)
-    assert.equal(data.worktrees[0].agents[0].parentKnown, false)
+    const child = data.worktrees[0].agents[0]
+    assert.equal(child.parentKnown, false)
+    assert.equal(child.source, 'event')
+    assert.equal(child.model, 'gpt-5.6')
+    assert.equal(child.effort, 'medium')
+    spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStart', 'codex'], { cwd: main, input: JSON.stringify({ cwd: main, session_id: 'root', agent_id: 'unknown-child', agent_type: 'worker' }) })
+    const unknownChild = JSON.parse(run(tool('agent-tree'), ['--json', '--codex'], main).stdout).worktrees[0].agents.find(node => node.id === 'unknown-child')
+    assert.equal(unknownChild.model, 'unknown')
+    assert.equal(unknownChild.effort, 'unknown')
     assert.equal(JSON.parse(run(tool('agent-tree'), ['--json', '--claude-code'], main).stdout).worktrees[0].agents.length, 0)
   } finally { cleanup(main) }
+})
+
+test('event-backed agents use explicit metadata fallbacks and interactive rendering is styled', () => {
+  const output = render({ worktrees: [{ path: '/workspace', agents: [
+    { cli: 'codex', id: 'child', status: 'running', source: 'event', model: 'unknown', effort: 'unknown', parentKnown: false, children: [] },
+    { cli: 'claude-code', id: 'pid:12', status: 'stopped', source: 'process', parentKnown: true, children: [] },
+    { cli: 'codex', id: 'waiting', status: 'unknown', source: 'event', model: 'o4-mini', effort: 'low', parentKnown: true, children: [] }
+  ] }] })
+  assert.match(output, /\x1b\[32mcodex child \[running\] model=unknown effort=unknown\x1b\[0m\x1b\[2m \(parent unknown\)\x1b\[0m/)
+  assert.match(output, /\x1b\[2;90mclaude-code pid:12 \[stopped\]\x1b\[0m\x1b\[2m \(process only; runtime metadata unavailable\)\x1b\[0m/)
+  assert.match(output, /\x1b\[33mcodex waiting \[unknown\] model=o4-mini effort=low\x1b\[0m/)
 })
 
 test('refuses malformed hook configuration instead of overwriting it', () => {

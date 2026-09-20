@@ -112,7 +112,8 @@ function recovered(roots, only) {
           if (!cwd || !id) continue
           let actual; try { actual = realpath(cwd) } catch { continue }
           if (!roots.some(root => actual === root || actual.startsWith(root + '/'))) continue
-          rows.push({ at: statSync(path).mtimeMs, event: 'Transcript', cli, cwd: actual, payload: { session_id: id, transcript_path: path } })
+          const metadata = readJson(path.replace(/\.jsonl$/, '.meta.json'), {})
+          rows.push({ at: statSync(path).mtimeMs, event: 'Transcript', cli, cwd: actual, payload: { session_id: id, transcript_path: path, model: metadata.model, effort: metadata.effort } })
           break
         }
       } catch {}
@@ -154,7 +155,25 @@ export function snapshot(cwd, only = null) {
     if (!tree) continue
     const key = `${row.cli}:${tree.path}:${id}`
     let node = byId.get(key)
-    if (!node) { node = { id, cli: row.cli, type: p.agent_type || 'session', parent: p.parent_agent_id || null, parentKnown: !p.agent_id || Boolean(p.parent_agent_id), status: 'unknown', lastEvent: null, children: [] }; byId.set(key, node); tree.agents.push(node) }
+    if (!node) {
+      node = {
+        id,
+        cli: row.cli,
+        type: p.agent_type || 'session',
+        parent: p.parent_agent_id || null,
+        parentKnown: !p.agent_id || Boolean(p.parent_agent_id),
+        source: 'event',
+        model: p.model ?? 'unknown',
+        effort: p.effort ?? 'unknown',
+        status: 'unknown',
+        lastEvent: null,
+        children: []
+      }
+      byId.set(key, node)
+      tree.agents.push(node)
+    }
+    if (p.model !== undefined) node.model = p.model
+    if (p.effort !== undefined) node.effort = p.effort
     node.lastEvent = row.event
     node.status = /End|Stop/.test(row.event) ? 'stopped' : 'unknown'
   }
@@ -164,7 +183,7 @@ export function snapshot(cwd, only = null) {
       if (only && cli !== only) continue
       const candidates = tree.agents.filter(a => a.cli === cli && a.type === 'session' && a.status !== 'stopped')
       if (candidates.length === 1) { candidates[0].status = 'running'; candidates[0].pid = p.pid }
-      else tree.agents.push({ id: `pid:${p.pid}`, cli, type: 'session', parent: null, parentKnown: true, status: 'running', pid: p.pid, lastEvent: null, children: [] })
+      else tree.agents.push({ id: `pid:${p.pid}`, cli, type: 'session', parent: null, parentKnown: true, source: 'process', status: 'running', pid: p.pid, lastEvent: null, children: [] })
     }
     const flat = tree.agents; tree.agents = []
     for (const node of flat) {
@@ -177,8 +196,14 @@ export function snapshot(cwd, only = null) {
 }
 export function render(data) {
   const lines = []
+  const statusColor = { running: '\x1b[32m', stopped: '\x1b[2;90m', unknown: '\x1b[33m' }
+  const reset = '\x1b[0m'
+  const dim = '\x1b[2m'
   const visit = (node, prefix = '') => {
-    lines.push(`${prefix}${node.cli} ${node.id} [${node.status}]${node.parentKnown ? '' : ' (parent unknown)'}`)
+    const metadata = node.source === 'event' ? ` model=${node.model} effort=${node.effort}` : ''
+    const sourceLimited = node.source === 'process' ? `${dim} (process only; runtime metadata unavailable)${reset}` : ''
+    const parentUnknown = node.parentKnown ? '' : `${dim} (parent unknown)${reset}`
+    lines.push(`${prefix}${statusColor[node.status] || statusColor.unknown}${node.cli} ${node.id} [${node.status}]${metadata}${reset}${parentUnknown}${sourceLimited}`)
     for (const child of node.children) visit(child, prefix + '  ')
   }
   for (const tree of data.worktrees) { lines.push(tree.path); for (const node of tree.agents) visit(node, '  ') }
