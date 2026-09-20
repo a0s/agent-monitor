@@ -110,6 +110,10 @@ function scalarSlug(value) {
   if (value && typeof value === 'object') return scalarSlug(value.level)
   return undefined
 }
+function taskTitle(value) {
+  const title = firstValue(value, ['title', 'task_title', 'taskTitle', 'description'])
+  return typeof title === 'string' ? title.trim().replace(/\s+/g, ' ') || undefined : undefined
+}
 function runtimeMetadata(value, cli = null) {
   let model = scalarSlug(firstValue(value, ['model', 'model_name', 'modelName']))
   const effort = scalarSlug(firstValue(value, ['effort', 'reasoning_effort', 'effort_level']))
@@ -189,9 +193,14 @@ export function snapshot(cwd, only = null, options = {}) {
       if (!leadEvent || !roots.includes(leadEvent.cwd)) continue
       for (const member of config.members) {
         if (!member.agentId || member.agentId === lead) continue
-        events.push({ at: Date.now(), event: 'TeamMember', cli: 'claude-code', cwd: leadEvent.cwd, payload: { agent_id: member.agentId, agent_type: member.agentType || member.name || 'teammate', parent_agent_id: config.leadAgentId || null, session_id: lead } })
+        events.push({ at: Date.now(), event: 'TeamMember', cli: 'claude-code', cwd: leadEvent.cwd, payload: { agent_id: member.agentId, agent_type: member.agentType || member.name || 'teammate', title: member.name, parent_agent_id: config.leadAgentId || null, session_id: lead } })
       }
     }
+  }
+  const titles = new Map()
+  for (const row of events) for (const task of row.payload?.background_tasks || []) {
+    const title = taskTitle(task)
+    if (task?.id && title) titles.set(`${row.cli}:${task.id}`, title)
   }
   const processes = (options.processes || processList().map(p => ({ ...p, cwd: processCwd(p.pid) }))).filter(p => p.cwd && roots.some(r => p.cwd === r || p.cwd.startsWith(r + '/')))
   const worktrees = roots.map(path => ({ path, agents: [] }))
@@ -212,6 +221,7 @@ export function snapshot(cwd, only = null, options = {}) {
       model: directMetadata.model ?? pathMetadata.model ?? recoveredMetadata.model,
       effort: directMetadata.effort ?? pathMetadata.effort ?? recoveredMetadata.effort
     }
+    const title = taskTitle(p) ?? titles.get(`${row.cli}:${id}`)
     if (!node) {
       node = {
         id,
@@ -222,6 +232,7 @@ export function snapshot(cwd, only = null, options = {}) {
         source: 'event',
         model: metadata.model ?? 'unknown',
         effort: metadata.effort ?? 'unknown',
+        title,
         status: 'unknown',
         lastEvent: null,
         lastAt: row.at,
@@ -233,6 +244,7 @@ export function snapshot(cwd, only = null, options = {}) {
     }
     if (metadata.model !== undefined) node.model = metadata.model
     if (metadata.effort !== undefined) node.effort = metadata.effort
+    if (title !== undefined) node.title = title
     node.lastEvent = row.event
     node.lastAt = row.at
     node.lastOrder = eventOrder
@@ -248,7 +260,7 @@ export function snapshot(cwd, only = null, options = {}) {
       else tree.agents.push({ id: `pid:${p.pid}`, cli, type: 'session', parent: null, parentKnown: true, source: 'process', status: 'running', pid: p.pid, lastEvent: null, children: [] })
     }
     const now = options.now ?? Date.now()
-    const flat = tree.agents.filter(node => node.source === 'process' || node.status === 'running' || (node.status === 'stopped' ? now - node.lastAt <= 300000 : now - node.lastAt <= 900000))
+    const flat = tree.agents.filter(node => node.source === 'process' || node.status === 'running' || (node.status === 'unknown' && now - node.lastAt <= 900000))
     const retained = new Set(flat)
     let addedParent = true
     while (addedParent) {
@@ -269,14 +281,21 @@ export function snapshot(cwd, only = null, options = {}) {
 }
 export function render(data) {
   const lines = []
-  const statusColor = { running: '\x1b[32m', stopped: '\x1b[2;90m', unknown: '\x1b[33m' }
+  const statusMarker = {
+    running: '\x1b[32m●\x1b[0m',
+    stopped: '\x1b[2;90m○\x1b[0m',
+    unknown: '\x1b[2;90m?\x1b[0m'
+  }
   const reset = '\x1b[0m'
   const dim = '\x1b[2m'
+  const displayId = id => String(id).replace(/^([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, '$1')
+  const displayTitle = title => title?.length > 80 ? `${title.slice(0, 77)}…` : title
   const visit = (node, prefix = '') => {
     const metadata = node.source === 'event' ? ` ${node.model}/${node.effort}` : ''
+    const title = node.source === 'event' && node.title ? ` — ${displayTitle(node.title)}` : ''
     const sourceLimited = node.source === 'process' ? `${dim} (process only; runtime metadata unavailable)${reset}` : ''
     const parentUnknown = node.parentKnown ? '' : `${dim} (parent unknown)${reset}`
-    lines.push(`${prefix}${statusColor[node.status] || statusColor.unknown}${node.cli} ${node.id} [${node.status}]${metadata}${reset}${parentUnknown}${sourceLimited}`)
+    lines.push(`${prefix}${statusMarker[node.status] || statusMarker.unknown} ${node.cli} ${displayId(node.id)}${metadata}${title}${parentUnknown}${sourceLimited}`)
     for (const child of node.children) visit(child, prefix + '  ')
   }
   for (const tree of data.worktrees) { lines.push(tree.path); for (const node of tree.agents) visit(node, '  ') }

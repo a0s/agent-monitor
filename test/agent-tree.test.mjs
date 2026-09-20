@@ -48,8 +48,7 @@ test('event snapshot and filters keep uncertain parents explicit', () => {
     assert.equal(unknownChild.effort, 'unknown')
     spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStop', 'codex'], { cwd: main, input: JSON.stringify({ cwd: main, session_id: 'root', agent_id: 'unknown-child', model: null, effort: null }) })
     const nullMetadataChild = JSON.parse(run(tool('agent-tree'), ['--json', '--codex'], main).stdout).worktrees[0].agents.find(node => node.id === 'unknown-child')
-    assert.equal(nullMetadataChild.model, 'unknown')
-    assert.equal(nullMetadataChild.effort, 'unknown')
+    assert.equal(nullMetadataChild, undefined)
     assert.equal(JSON.parse(run(tool('agent-tree'), ['--json', '--claude-code'], main).stdout).worktrees[0].agents.length, 0)
   } finally { cleanup(main) }
 })
@@ -60,9 +59,19 @@ test('event-backed agents use explicit metadata fallbacks and interactive render
     { cli: 'claude-code', id: 'pid:12', status: 'stopped', source: 'process', parentKnown: true, children: [] },
     { cli: 'codex', id: 'waiting', status: 'unknown', source: 'event', model: 'o4-mini', effort: 'low', parentKnown: true, children: [] }
   ] }] })
-  assert.match(output, /\x1b\[32mcodex child \[running\] unknown\/unknown\x1b\[0m\x1b\[2m \(parent unknown\)\x1b\[0m/)
-  assert.match(output, /\x1b\[2;90mclaude-code pid:12 \[stopped\]\x1b\[0m\x1b\[2m \(process only; runtime metadata unavailable\)\x1b\[0m/)
-  assert.match(output, /\x1b\[33mcodex waiting \[unknown\] o4-mini\/low\x1b\[0m/)
+  assert.match(output, /\x1b\[32m●\x1b\[0m codex child unknown\/unknown\x1b\[2m \(parent unknown\)\x1b\[0m/)
+  assert.match(output, /\x1b\[2;90m○\x1b\[0m claude-code pid:12\x1b\[2m \(process only; runtime metadata unavailable\)\x1b\[0m/)
+  assert.match(output, /\x1b\[2;90m\?\x1b\[0m codex waiting o4-mini\/low/)
+})
+
+test('interactive rendering shortens UUIDs without changing other identifiers', () => {
+  const output = render({ worktrees: [{ path: '/workspace', agents: [
+    { cli: 'claude-code', id: 'c21db08d-8424-4ef0-927a-0735221006ce', status: 'running', source: 'event', model: 'sonnet-5', effort: 'medium', title: 'Implement account endpoint', parentKnown: true, children: [] },
+    { cli: 'claude-code', id: 'aceefdf3359141526', status: 'stopped', source: 'event', model: 'sonnet-5', effort: 'medium', parentKnown: true, children: [] }
+  ] }] })
+  assert.match(output, /claude-code c21db08d sonnet-5\/medium — Implement account endpoint/)
+  assert.match(output, /claude-code aceefdf3359141526 sonnet-5\/medium/)
+  assert.doesNotMatch(output, /c21db08d-8424-4ef0-927a-0735221006ce/)
 })
 
 test('normalizes Claude metadata, recovers transcripts, nests subagents, and prunes live nodes', () => {
@@ -70,10 +79,10 @@ test('normalizes Claude metadata, recovers transcripts, nests subagents, and pru
   try {
     assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
     writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-4-1' }, effort: 'medium' }) + '\n')
-    const parent = { cwd: main, session_id: 'parent', model: 'claude-sonnet-4', effort: { level: 'high' } }
+    const parent = { cwd: main, session_id: 'parent', model: 'claude-sonnet-4', effort: { level: 'high' }, background_tasks: [{ id: 'child', description: 'Implement agent tree title' }] }
     const child = { cwd: main, session_id: 'parent', agent_id: 'child', transcript_path: transcript, effort: { level: 'medium' } }
     spawnSync('node', [tool('agent-tree'), '_event', 'SessionStart', 'claude-code'], { cwd: main, input: JSON.stringify(parent) })
-    spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStop', 'claude-code'], { cwd: main, input: JSON.stringify(child) })
+    spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStart', 'claude-code'], { cwd: main, input: JSON.stringify(child) })
     const common = run('git', ['rev-parse', '--git-common-dir'], main).stdout.trim()
     const eventDir = join(main, common, 'agent-tree')
     appendFileSync(join(eventDir, 'events.jsonl'), [
@@ -87,13 +96,14 @@ test('normalizes Claude metadata, recovers transcripts, nests subagents, and pru
     assert.equal(parentNode.children[0].id, 'child')
     assert.equal(parentNode.children[0].model, 'opus-4-1')
     assert.equal(parentNode.children[0].effort, 'medium')
+    assert.equal(parentNode.children[0].title, 'Implement agent tree title')
     assert.equal(parentNode.children[0].parentKnown, true)
     assert.equal(data.worktrees[0].agents.some(node => /expired/.test(node.id)), false)
-    assert.match(render(data), /claude-code child \[stopped\] opus-4-1\/medium/)
+    assert.match(render(data), /\x1b\[2;90m\?\x1b\[0m claude-code child opus-4-1\/medium — Implement agent tree title/)
   } finally { cleanup(main) }
 })
 
-test('retains a stale parent needed by a fresh stopped descendant', () => {
+test('retains a stale parent needed by a fresh active descendant', () => {
   const main = repo(), now = Date.now()
   try {
     assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
@@ -103,7 +113,7 @@ test('retains a stale parent needed by a fresh stopped descendant', () => {
     mkdirSync(eventDir, { recursive: true })
     appendFileSync(join(eventDir, 'events.jsonl'), [
       { at: now - 901000, event: 'SessionStart', cli: 'claude-code', cwd: worktreePath, payload: { session_id: 'stale-parent', model: 'claude-sonnet-4', effort: { level: 'high' } } },
-      { at: now - 299000, event: 'SubagentStop', cli: 'claude-code', cwd: worktreePath, payload: { session_id: 'stale-parent', agent_id: 'fresh-child', parent_agent_id: 'stale-parent', model: 'claude-opus-4-1', effort: { level: 'medium' } } }
+      { at: now - 299000, event: 'SubagentStart', cli: 'claude-code', cwd: worktreePath, payload: { session_id: 'stale-parent', agent_id: 'fresh-child', parent_agent_id: 'stale-parent', model: 'claude-opus-4-1', effort: { level: 'medium' } } }
     ].map(JSON.stringify).join('\n') + '\n')
     const data = snapshot(main, 'claude-code', { processes: [], now })
     const parent = data.worktrees[0].agents.find(node => node.id === 'stale-parent')
@@ -112,7 +122,7 @@ test('retains a stale parent needed by a fresh stopped descendant', () => {
     assert.equal(parent.children[0].id, 'fresh-child')
     assert.equal(parent.children[0].model, 'opus-4-1')
     assert.equal(parent.children[0].effort, 'medium')
-    assert.match(render(data), /claude-code fresh-child \[stopped\] opus-4-1\/medium/)
+    assert.match(render(data), /\x1b\[2;90m\?\x1b\[0m claude-code fresh-child opus-4-1\/medium/)
   } finally { cleanup(main) }
 })
 
