@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+import { install, record, snapshot, render } from '../lib/agent-tree.mjs'
+
+const argv = process.argv.slice(2)
+const command = argv[0]?.startsWith('_') ? argv.shift() : null
+const args = argv
+try {
+  if (command === '_install') install(args[0] || process.cwd(), args.includes('--single'))
+  else if (command === '_event') { record(args[0], args[1]); if (args[0] === 'SubagentStop') process.stdout.write('{}\n') }
+  else {
+    const json = args.includes('--json')
+    const only = args.includes('--codex') ? 'codex' : args.includes('--claude-code') ? 'claude-code' : null
+    if (args.some(x => !['--json', '--codex', '--claude-code'].includes(x)) || (args.includes('--codex') && args.includes('--claude-code'))) throw Error('usage: agent-tree [--codex|--claude-code] [--json]')
+    const show = () => { const data = snapshot(process.cwd(), only); process.stdout.write(json ? JSON.stringify(data, null, 2) + '\n' : '\x1b[2J\x1b[H' + render(data) + '\n') }
+    show()
+    if (!json) setInterval(show, 2000)
+  }
+} catch (error) { console.error(`agent-tree: ${error.message}`); process.exitCode = 1 }
