@@ -119,11 +119,13 @@ function runtimeMetadata(value, cli = null) {
     effort
   }
 }
-function transcriptMetadata(path, cli) {
+function transcriptMetadata(path, cli, cache, lines = null) {
+  const key = `${cli}:${path}`
+  if (cache?.has(key)) return cache.get(key)
   let model
   let effort
   try {
-    for (const line of readFileSync(path, 'utf8').split('\n')) {
+    for (const line of lines ?? readFileSync(path, 'utf8').split('\n')) {
       let row; try { row = JSON.parse(line) } catch { continue }
       const sources = [row, row.message, row.payload, row.payload?.thread_settings, row.payload?.payload, row.payload?.payload?.thread_settings]
       for (const source of sources) {
@@ -133,10 +135,16 @@ function transcriptMetadata(path, cli) {
       }
     }
     const sidecarMetadata = runtimeMetadata(readJson(path.replace(/\.jsonl$/, '.meta.json'), {}), cli)
-    return { model: model ?? sidecarMetadata.model, effort: effort ?? sidecarMetadata.effort }
-  } catch { return {} }
+    const metadata = { model: model ?? sidecarMetadata.model, effort: effort ?? sidecarMetadata.effort }
+    cache?.set(key, metadata)
+    return metadata
+  } catch {
+    const metadata = {}
+    cache?.set(key, metadata)
+    return metadata
+  }
 }
-function recovered(roots, only) {
+function recovered(roots, only, cache) {
   const rows = []
   for (const [cli, dir, depth] of [['codex', join(homedir(), '.codex', 'sessions'), 5], ['claude-code', join(homedir(), '.claude', 'projects'), 2]]) {
     if (only && cli !== only) continue
@@ -154,7 +162,7 @@ function recovered(roots, only) {
           session = { cwd: actual, id }
         }
         if (!session) continue
-        const metadata = transcriptMetadata(path, cli)
+        const metadata = transcriptMetadata(path, cli, cache, lines)
         rows.push({ at: statSync(path).mtimeMs, event: 'Transcript', cli, cwd: session.cwd, payload: { session_id: session.id, transcript_path: path, ...metadata } })
       } catch {}
     }
@@ -163,9 +171,10 @@ function recovered(roots, only) {
 }
 export function snapshot(cwd, only = null, options = {}) {
   const roots = trees(cwd)
+  const transcriptCache = new Map()
   const eventsPath = join(common(cwd), 'agent-tree', 'events.jsonl')
   const events = (existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8').split('\n').filter(Boolean).flatMap(x => { try { return [JSON.parse(x)] } catch { return [] } }) : []).filter(x => x.at > Date.now() - 86400000)
-  const transcripts = recovered(roots, only)
+  const transcripts = recovered(roots, only, transcriptCache)
   const transcriptBySession = new Map(transcripts.map(row => [`${row.cli}:${row.payload.session_id}`, row]))
   for (const row of transcripts) if (!events.some(event => `${event.cli}:${event.payload?.session_id}` === `${row.cli}:${row.payload.session_id}`)) events.push(row)
   if (!only || only === 'claude-code') {
@@ -197,7 +206,7 @@ export function snapshot(cwd, only = null, options = {}) {
     const key = `${row.cli}:${tree.path}:${id}`
     let node = byId.get(key)
     const directMetadata = runtimeMetadata(p, row.cli)
-    const pathMetadata = p.transcript_path ? transcriptMetadata(p.transcript_path, row.cli) : {}
+    const pathMetadata = p.transcript_path ? transcriptMetadata(p.transcript_path, row.cli, transcriptCache) : {}
     const recoveredMetadata = transcriptBySession.get(`${row.cli}:${p.session_id}`)?.payload || {}
     const metadata = {
       model: directMetadata.model ?? pathMetadata.model ?? recoveredMetadata.model,
