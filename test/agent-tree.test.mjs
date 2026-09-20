@@ -93,6 +93,29 @@ test('normalizes Claude metadata, recovers transcripts, nests subagents, and pru
   } finally { cleanup(main) }
 })
 
+test('retains a stale parent needed by a fresh stopped descendant', () => {
+  const main = repo(), now = Date.now()
+  try {
+    assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
+    const common = run('git', ['rev-parse', '--git-common-dir'], main).stdout.trim()
+    const eventDir = join(main, common, 'agent-tree')
+    const worktreePath = realpathSync(main)
+    mkdirSync(eventDir, { recursive: true })
+    appendFileSync(join(eventDir, 'events.jsonl'), [
+      { at: now - 901000, event: 'SessionStart', cli: 'claude-code', cwd: worktreePath, payload: { session_id: 'stale-parent', model: 'claude-sonnet-4', effort: { level: 'high' } } },
+      { at: now - 299000, event: 'SubagentStop', cli: 'claude-code', cwd: worktreePath, payload: { session_id: 'stale-parent', agent_id: 'fresh-child', parent_agent_id: 'stale-parent', model: 'claude-opus-4-1', effort: { level: 'medium' } } }
+    ].map(JSON.stringify).join('\n') + '\n')
+    const data = snapshot(main, 'claude-code', { processes: [], now })
+    const parent = data.worktrees[0].agents.find(node => node.id === 'stale-parent')
+    assert.equal(parent.model, 'sonnet-4')
+    assert.equal(parent.effort, 'high')
+    assert.equal(parent.children[0].id, 'fresh-child')
+    assert.equal(parent.children[0].model, 'opus-4-1')
+    assert.equal(parent.children[0].effort, 'medium')
+    assert.match(render(data), /claude-code fresh-child \[stopped\] opus-4-1\/medium/)
+  } finally { cleanup(main) }
+})
+
 test('Claude bg-spare helpers do not create nodes and the main process uses the newest session', () => {
   const main = repo()
   try {
