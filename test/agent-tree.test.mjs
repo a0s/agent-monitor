@@ -141,6 +141,30 @@ test('Claude bg-spare helpers do not create nodes and the main process uses the 
   } finally { cleanup(main) }
 })
 
+test('Claude team members use configured repository worktrees and otherwise stay with the lead', () => {
+  const main = repo(), assigned = worktree(main, 'assigned'), home = temp()
+  try {
+    const team = join(home, '.claude', 'teams', 'feature-team')
+    mkdirSync(team, { recursive: true })
+    writeFileSync(join(team, 'config.json'), JSON.stringify({
+      leadSessionId: 'lead',
+      leadAgentId: 'lead',
+      members: [
+        { agentId: 'assigned', agentType: 'worker', name: 'Assigned teammate', worktreePath: assigned },
+        { agentId: 'missing-path', agentType: 'worker', name: 'No configured worktree' },
+        { agentId: 'outside-repo', agentType: 'worker', name: 'Outside repository', worktreePath: home }
+      ]
+    }))
+    spawnSync('node', [tool('agent-tree'), '_event', 'SessionStart', 'claude-code'], { cwd: main, input: JSON.stringify({ cwd: main, session_id: 'lead' }) })
+    const data = JSON.parse(run(tool('agent-tree'), ['--json', '--claude-code'], main, { HOME: home }).stdout)
+    const mainTree = data.worktrees.find(tree => tree.path === realpathSync(main))
+    const assignedTree = data.worktrees.find(tree => tree.path === realpathSync(assigned))
+    assert.deepEqual(assignedTree.agents.map(node => node.id), ['assigned'])
+    assert.deepEqual(mainTree.agents.find(node => node.id === 'lead').children.map(node => node.id).sort(), ['missing-path', 'outside-repo'])
+    assert.match(render(data), new RegExp(`${realpathSync(assigned)}\\n  \\x1b\\[2;90m\\?\\x1b\\[0m claude-code assigned`))
+  } finally { cleanup(home, assigned, main) }
+})
+
 test('recovers Codex thread settings after initial session metadata', () => {
   const main = repo(), home = temp()
   try {

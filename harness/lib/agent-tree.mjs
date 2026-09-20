@@ -114,6 +114,15 @@ function taskTitle(value) {
   const title = firstValue(value, ['title', 'task_title', 'taskTitle', 'description'])
   return typeof title === 'string' ? title.trim().replace(/\s+/g, ' ') || undefined : undefined
 }
+function teamMemberCwd(member, roots, fallback) {
+  if (typeof member?.worktreePath !== 'string' || !member.worktreePath.trim()) return fallback
+  try {
+    const configured = realpath(resolve(member.worktreePath))
+    return roots.includes(configured) ? configured : fallback
+  } catch {
+    return fallback
+  }
+}
 function runtimeMetadata(value, cli = null) {
   let model = scalarSlug(firstValue(value, ['model', 'model_name', 'modelName']))
   const effort = scalarSlug(firstValue(value, ['effort', 'reasoning_effort', 'effort_level']))
@@ -193,7 +202,7 @@ export function snapshot(cwd, only = null, options = {}) {
       if (!leadEvent || !roots.includes(leadEvent.cwd)) continue
       for (const member of config.members) {
         if (!member.agentId || member.agentId === lead) continue
-        events.push({ at: Date.now(), event: 'TeamMember', cli: 'claude-code', cwd: leadEvent.cwd, payload: { agent_id: member.agentId, agent_type: member.agentType || member.name || 'teammate', title: member.name, parent_agent_id: config.leadAgentId || null, session_id: lead } })
+        events.push({ at: Date.now(), event: 'TeamMember', cli: 'claude-code', cwd: teamMemberCwd(member, roots, leadEvent.cwd), payload: { agent_id: member.agentId, agent_type: member.agentType || member.name || 'teammate', title: member.name, parent_agent_id: config.leadAgentId || null, session_id: lead } })
       }
     }
   }
