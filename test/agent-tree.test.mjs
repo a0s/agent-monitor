@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { repo, worktree, run, cleanup, root, tool } from './helpers.mjs'
+import { repo, worktree, run, cleanup, root, temp, tool } from './helpers.mjs'
 import { checkGitVersion, render } from '../harness/lib/agent-tree.mjs'
 
 test('installs in current and future worktrees while preserving hooks', () => {
@@ -34,7 +34,7 @@ test('event snapshot and filters keep uncertain parents explicit', () => {
   const main = repo()
   try {
     assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
-    const event = { cwd: main, session_id: 'root', agent_id: 'child', agent_type: 'worker', model: 'gpt-5.6', effort: 'medium' }
+    const event = { cwd: main, session_id: 'root', agent_id: 'child', agent_type: 'worker', model_name: 'gpt-5.6', reasoning_effort: 'medium' }
     spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStart', 'codex'], { cwd: main, input: JSON.stringify(event) })
     const data = JSON.parse(run(tool('agent-tree'), ['--json', '--codex'], main).stdout)
     const child = data.worktrees[0].agents[0]
@@ -46,6 +46,10 @@ test('event snapshot and filters keep uncertain parents explicit', () => {
     const unknownChild = JSON.parse(run(tool('agent-tree'), ['--json', '--codex'], main).stdout).worktrees[0].agents.find(node => node.id === 'unknown-child')
     assert.equal(unknownChild.model, 'unknown')
     assert.equal(unknownChild.effort, 'unknown')
+    spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStop', 'codex'], { cwd: main, input: JSON.stringify({ cwd: main, session_id: 'root', agent_id: 'unknown-child', model: null, effort: null }) })
+    const nullMetadataChild = JSON.parse(run(tool('agent-tree'), ['--json', '--codex'], main).stdout).worktrees[0].agents.find(node => node.id === 'unknown-child')
+    assert.equal(nullMetadataChild.model, 'unknown')
+    assert.equal(nullMetadataChild.effort, 'unknown')
     assert.equal(JSON.parse(run(tool('agent-tree'), ['--json', '--claude-code'], main).stdout).worktrees[0].agents.length, 0)
   } finally { cleanup(main) }
 })
@@ -59,6 +63,23 @@ test('event-backed agents use explicit metadata fallbacks and interactive render
   assert.match(output, /\x1b\[32mcodex child \[running\] model=unknown effort=unknown\x1b\[0m\x1b\[2m \(parent unknown\)\x1b\[0m/)
   assert.match(output, /\x1b\[2;90mclaude-code pid:12 \[stopped\]\x1b\[0m\x1b\[2m \(process only; runtime metadata unavailable\)\x1b\[0m/)
   assert.match(output, /\x1b\[33mcodex waiting \[unknown\] model=o4-mini effort=low\x1b\[0m/)
+})
+
+test('recovers Codex thread settings after initial session metadata', () => {
+  const main = repo(), home = temp()
+  try {
+    assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
+    const sessions = join(home, '.codex', 'sessions', '2026', '09', '20')
+    mkdirSync(sessions, { recursive: true })
+    writeFileSync(join(sessions, 'session.jsonl'), [
+      JSON.stringify({ type: 'session_meta', payload: { id: 'recovered', cwd: main } }),
+      JSON.stringify({ type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model: 'gpt-5.6', reasoning_effort: 'high' } } })
+    ].join('\n') + '\n')
+    const data = JSON.parse(run(tool('agent-tree'), ['--json', '--codex'], main, { HOME: home }).stdout)
+    const recovered = data.worktrees[0].agents.find(node => node.id === 'recovered')
+    assert.equal(recovered.model, 'gpt-5.6')
+    assert.equal(recovered.effort, 'high')
+  } finally { cleanup(home, main) }
 })
 
 test('refuses malformed hook configuration instead of overwriting it', () => {
