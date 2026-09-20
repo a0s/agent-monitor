@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { repo, worktree, run, cleanup, root, temp, tool } from './helpers.mjs'
-import { checkGitVersion, render } from '../harness/lib/agent-tree.mjs'
+import { checkGitVersion, render, snapshot } from '../harness/lib/agent-tree.mjs'
 
 test('installs in current and future worktrees while preserving hooks', () => {
   const main = repo(), old = worktree(main, 'old')
@@ -60,9 +60,52 @@ test('event-backed agents use explicit metadata fallbacks and interactive render
     { cli: 'claude-code', id: 'pid:12', status: 'stopped', source: 'process', parentKnown: true, children: [] },
     { cli: 'codex', id: 'waiting', status: 'unknown', source: 'event', model: 'o4-mini', effort: 'low', parentKnown: true, children: [] }
   ] }] })
-  assert.match(output, /\x1b\[32mcodex child \[running\] model=unknown effort=unknown\x1b\[0m\x1b\[2m \(parent unknown\)\x1b\[0m/)
+  assert.match(output, /\x1b\[32mcodex child \[running\] unknown\/unknown\x1b\[0m\x1b\[2m \(parent unknown\)\x1b\[0m/)
   assert.match(output, /\x1b\[2;90mclaude-code pid:12 \[stopped\]\x1b\[0m\x1b\[2m \(process only; runtime metadata unavailable\)\x1b\[0m/)
-  assert.match(output, /\x1b\[33mcodex waiting \[unknown\] model=o4-mini effort=low\x1b\[0m/)
+  assert.match(output, /\x1b\[33mcodex waiting \[unknown\] o4-mini\/low\x1b\[0m/)
+})
+
+test('normalizes Claude metadata, recovers transcripts, nests subagents, and prunes live nodes', () => {
+  const main = repo(), transcript = join(main, 'claude.jsonl')
+  try {
+    assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
+    writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-4-1' }, effort: 'medium' }) + '\n')
+    const parent = { cwd: main, session_id: 'parent', model: 'claude-sonnet-4', effort: { level: 'high' } }
+    const child = { cwd: main, session_id: 'parent', agent_id: 'child', transcript_path: transcript, effort: { level: 'medium' } }
+    spawnSync('node', [tool('agent-tree'), '_event', 'SessionStart', 'claude-code'], { cwd: main, input: JSON.stringify(parent) })
+    spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStop', 'claude-code'], { cwd: main, input: JSON.stringify(child) })
+    const common = run('git', ['rev-parse', '--git-common-dir'], main).stdout.trim()
+    const eventDir = join(main, common, 'agent-tree')
+    appendFileSync(join(eventDir, 'events.jsonl'), [
+      { at: Date.now() - 301000, event: 'SubagentStop', cli: 'claude-code', cwd: main, payload: { session_id: 'expired-stop' } },
+      { at: Date.now() - 901000, event: 'SessionStart', cli: 'claude-code', cwd: main, payload: { session_id: 'expired-unknown' } }
+    ].map(JSON.stringify).join('\n') + '\n')
+    const data = JSON.parse(run(tool('agent-tree'), ['--json', '--claude-code'], main).stdout)
+    const parentNode = data.worktrees[0].agents.find(node => node.id === 'parent')
+    assert.equal(parentNode.model, 'sonnet-4')
+    assert.equal(parentNode.effort, 'high')
+    assert.equal(parentNode.children[0].id, 'child')
+    assert.equal(parentNode.children[0].model, 'opus-4-1')
+    assert.equal(parentNode.children[0].effort, 'medium')
+    assert.equal(parentNode.children[0].parentKnown, true)
+    assert.equal(data.worktrees[0].agents.some(node => /expired/.test(node.id)), false)
+    assert.match(render(data), /claude-code child \[stopped\] opus-4-1\/medium/)
+  } finally { cleanup(main) }
+})
+
+test('Claude bg-spare helpers do not create nodes and the main process uses the newest session', () => {
+  const main = repo()
+  try {
+    assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
+    for (const session_id of ['older', 'newer']) spawnSync('node', [tool('agent-tree'), '_event', 'SessionStart', 'claude-code'], { cwd: main, input: JSON.stringify({ cwd: main, session_id }) })
+    const data = snapshot(main, 'claude-code', { processes: [
+      { pid: 101, command: 'claude bg-spare', cwd: realpathSync(main) },
+      { pid: 102, command: 'claude', cwd: realpathSync(main) }
+    ] })
+    assert.equal(data.worktrees[0].agents.find(node => node.id === 'newer').status, 'running')
+    assert.equal(data.worktrees[0].agents.some(node => node.id === 'pid:101'), false)
+    assert.equal(data.worktrees[0].agents.some(node => node.id === 'pid:102'), false)
+  } finally { cleanup(main) }
 })
 
 test('recovers Codex thread settings after initial session metadata', () => {

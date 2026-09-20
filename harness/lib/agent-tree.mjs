@@ -102,11 +102,39 @@ function firstValue(value, keys) {
   for (const key of keys) if (value?.[key] != null) return value[key]
   return undefined
 }
-function runtimeMetadata(value) {
-  return {
-    model: firstValue(value, ['model', 'model_name', 'modelName']),
-    effort: firstValue(value, ['effort', 'reasoning_effort', 'effort_level'])
+function scalarSlug(value) {
+  if (typeof value === 'string' || typeof value === 'number') {
+    const slug = String(value).trim()
+    return slug || undefined
   }
+  if (value && typeof value === 'object') return scalarSlug(value.level)
+  return undefined
+}
+function runtimeMetadata(value, cli = null) {
+  let model = scalarSlug(firstValue(value, ['model', 'model_name', 'modelName']))
+  const effort = scalarSlug(firstValue(value, ['effort', 'reasoning_effort', 'effort_level']))
+  if (cli === 'claude-code' && model) model = model.replace(/^claude-/i, '') || undefined
+  return {
+    model,
+    effort
+  }
+}
+function transcriptMetadata(path, cli) {
+  let model
+  let effort
+  try {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      let row; try { row = JSON.parse(line) } catch { continue }
+      const sources = [row, row.message, row.payload, row.payload?.thread_settings, row.payload?.payload, row.payload?.payload?.thread_settings]
+      for (const source of sources) {
+        const metadata = runtimeMetadata(source, cli)
+        if (metadata.model !== undefined) model = metadata.model
+        if (metadata.effort !== undefined) effort = metadata.effort
+      }
+    }
+    const sidecarMetadata = runtimeMetadata(readJson(path.replace(/\.jsonl$/, '.meta.json'), {}), cli)
+    return { model: model ?? sidecarMetadata.model, effort: effort ?? sidecarMetadata.effort }
+  } catch { return {} }
 }
 function recovered(roots, only) {
   const rows = []
@@ -114,18 +142,10 @@ function recovered(roots, only) {
     if (only && cli !== only) continue
     for (const path of recentJsonl(dir, depth)) {
       try {
-        const head = readFileSync(path, 'utf8').slice(0, 16384).split('\n').slice(0, 40)
+        const lines = readFileSync(path, 'utf8').split('\n')
         let session = null
-        let model
-        let effort
-        for (const line of head) {
+        for (const line of lines) {
           let row; try { row = JSON.parse(line) } catch { continue }
-          const metadata = [row, row.payload, row.payload?.thread_settings, row.payload?.payload, row.payload?.payload?.thread_settings]
-            .map(runtimeMetadata)
-          for (const item of metadata) {
-            if (item.model !== undefined) model = item.model
-            if (item.effort !== undefined) effort = item.effort
-          }
           const cwd = row.cwd || row.payload?.cwd
           const id = row.sessionId || row.payload?.id || row.session_id
           if (!cwd || !id) continue
@@ -134,20 +154,20 @@ function recovered(roots, only) {
           session = { cwd: actual, id }
         }
         if (!session) continue
-        const sidecar = readJson(path.replace(/\.jsonl$/, '.meta.json'), {})
-        const sidecarMetadata = runtimeMetadata(sidecar)
-        rows.push({ at: statSync(path).mtimeMs, event: 'Transcript', cli, cwd: session.cwd, payload: { session_id: session.id, transcript_path: path, model: model ?? sidecarMetadata.model, effort: effort ?? sidecarMetadata.effort } })
+        const metadata = transcriptMetadata(path, cli)
+        rows.push({ at: statSync(path).mtimeMs, event: 'Transcript', cli, cwd: session.cwd, payload: { session_id: session.id, transcript_path: path, ...metadata } })
       } catch {}
     }
   }
   return rows
 }
-export function snapshot(cwd, only = null) {
+export function snapshot(cwd, only = null, options = {}) {
   const roots = trees(cwd)
   const eventsPath = join(common(cwd), 'agent-tree', 'events.jsonl')
   const events = (existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8').split('\n').filter(Boolean).flatMap(x => { try { return [JSON.parse(x)] } catch { return [] } }) : []).filter(x => x.at > Date.now() - 86400000)
-  const seen = new Set(events.map(x => `${x.cli}:${x.payload?.session_id}`))
-  for (const row of recovered(roots, only)) if (!seen.has(`${row.cli}:${row.payload.session_id}`)) events.push(row)
+  const transcripts = recovered(roots, only)
+  const transcriptBySession = new Map(transcripts.map(row => [`${row.cli}:${row.payload.session_id}`, row]))
+  for (const row of transcripts) if (!events.some(event => `${event.cli}:${event.payload?.session_id}` === `${row.cli}:${row.payload.session_id}`)) events.push(row)
   if (!only || only === 'claude-code') {
     const teamRoot = join(homedir(), '.claude', 'teams')
     if (existsSync(teamRoot)) for (const name of readdirSync(teamRoot)) {
@@ -164,10 +184,10 @@ export function snapshot(cwd, only = null) {
       }
     }
   }
-  const processes = processList().map(p => ({ ...p, cwd: processCwd(p.pid) })).filter(p => p.cwd && roots.some(r => p.cwd === r || p.cwd.startsWith(r + '/')))
+  const processes = (options.processes || processList().map(p => ({ ...p, cwd: processCwd(p.pid) }))).filter(p => p.cwd && roots.some(r => p.cwd === r || p.cwd.startsWith(r + '/')))
   const worktrees = roots.map(path => ({ path, agents: [] }))
   const byId = new Map()
-  for (const row of events) {
+  for (const [eventOrder, row] of events.entries()) {
     if (only && row.cli !== only) continue
     const p = row.payload || {}
     const id = p.agent_id || p.session_id
@@ -176,19 +196,27 @@ export function snapshot(cwd, only = null) {
     if (!tree) continue
     const key = `${row.cli}:${tree.path}:${id}`
     let node = byId.get(key)
-    const metadata = runtimeMetadata(p)
+    const directMetadata = runtimeMetadata(p, row.cli)
+    const pathMetadata = p.transcript_path ? transcriptMetadata(p.transcript_path, row.cli) : {}
+    const recoveredMetadata = transcriptBySession.get(`${row.cli}:${p.session_id}`)?.payload || {}
+    const metadata = {
+      model: directMetadata.model ?? pathMetadata.model ?? recoveredMetadata.model,
+      effort: directMetadata.effort ?? pathMetadata.effort ?? recoveredMetadata.effort
+    }
     if (!node) {
       node = {
         id,
         cli: row.cli,
         type: p.agent_type || 'session',
-        parent: p.parent_agent_id || null,
-        parentKnown: !p.agent_id || Boolean(p.parent_agent_id),
+        parent: p.parent_agent_id || (row.cli === 'claude-code' && p.agent_id ? p.session_id : null),
+        parentKnown: !p.agent_id || Boolean(p.parent_agent_id || (row.cli === 'claude-code' && p.session_id)),
         source: 'event',
         model: metadata.model ?? 'unknown',
         effort: metadata.effort ?? 'unknown',
         status: 'unknown',
         lastEvent: null,
+        lastAt: row.at,
+        lastOrder: eventOrder,
         children: []
       }
       byId.set(key, node)
@@ -197,17 +225,21 @@ export function snapshot(cwd, only = null) {
     if (metadata.model !== undefined) node.model = metadata.model
     if (metadata.effort !== undefined) node.effort = metadata.effort
     node.lastEvent = row.event
+    node.lastAt = row.at
+    node.lastOrder = eventOrder
     node.status = /End|Stop/.test(row.event) ? 'stopped' : 'unknown'
   }
   for (const tree of worktrees) {
     for (const p of processes.filter(p => p.cwd === tree.path || p.cwd.startsWith(tree.path + '/'))) {
       const cli = /(^|[\s/])codex(\s|$)/.test(p.command) ? 'codex' : 'claude-code'
       if (only && cli !== only) continue
-      const candidates = tree.agents.filter(a => a.cli === cli && a.type === 'session' && a.status !== 'stopped')
-      if (candidates.length === 1) { candidates[0].status = 'running'; candidates[0].pid = p.pid }
+      if (cli === 'claude-code' && /(?:^|\s)bg-spare(?:\s|$)/.test(p.command)) continue
+      const candidates = tree.agents.filter(a => a.cli === cli && a.type === 'session' && a.status !== 'stopped').sort((a, b) => b.lastAt - a.lastAt || b.lastOrder - a.lastOrder)
+      if (candidates.length) { candidates[0].status = 'running'; candidates[0].pid = p.pid }
       else tree.agents.push({ id: `pid:${p.pid}`, cli, type: 'session', parent: null, parentKnown: true, source: 'process', status: 'running', pid: p.pid, lastEvent: null, children: [] })
     }
-    const flat = tree.agents; tree.agents = []
+    const now = options.now ?? Date.now()
+    const flat = tree.agents.filter(node => node.source === 'process' || node.status === 'running' || (node.status === 'stopped' ? now - node.lastAt <= 300000 : now - node.lastAt <= 900000)); tree.agents = []
     for (const node of flat) {
       const parent = node.parent && flat.find(x => x.cli === node.cli && x.id === node.parent)
       if (parent) { parent.children.push(node); node.parentKnown = true }
@@ -222,7 +254,7 @@ export function render(data) {
   const reset = '\x1b[0m'
   const dim = '\x1b[2m'
   const visit = (node, prefix = '') => {
-    const metadata = node.source === 'event' ? ` model=${node.model} effort=${node.effort}` : ''
+    const metadata = node.source === 'event' ? ` ${node.model}/${node.effort}` : ''
     const sourceLimited = node.source === 'process' ? `${dim} (process only; runtime metadata unavailable)${reset}` : ''
     const parentUnknown = node.parentKnown ? '' : `${dim} (parent unknown)${reset}`
     lines.push(`${prefix}${statusColor[node.status] || statusColor.unknown}${node.cli} ${node.id} [${node.status}]${metadata}${reset}${parentUnknown}${sourceLimited}`)
