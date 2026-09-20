@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
@@ -123,6 +123,68 @@ function teamMemberCwd(member, roots, fallback) {
     return fallback
   }
 }
+function initialUserMessage(path) {
+  try {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      let row; try { row = JSON.parse(line) } catch { continue }
+      if (row.type !== 'user' || row.message?.role !== 'user') continue
+      return typeof row.message.content === 'string' ? row.message.content : null
+    }
+  } catch {}
+  return null
+}
+function worktreeAddPath(command) {
+  const tokens = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || []
+  const value = token => token.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, '$1$2')
+  for (let index = 0; index < tokens.length; index++) {
+    const token = value(tokens[index])
+    if (token === '--') return tokens[index + 1] && value(tokens[index + 1])
+    if (!token.startsWith('-')) return token
+    if (['-b', '-B', '--orphan', '--lock', '--reason'].includes(token)) index++
+  }
+  return null
+}
+function transcriptWorktree(path, roots, cache) {
+  if (cache.has(path)) return cache.get(path)
+  const message = initialUserMessage(path)
+  const matches = new Set()
+  const directives = [
+    ...(message?.matchAll(/^Worktree:\s+(.+?)(?=\s+\(|\r?$)/gm) || []),
+    ...(message?.matchAll(/\bEnterWorktree with path=(\/[^\s()]+)/g) || []),
+    ...(message?.matchAll(/^Work in git worktree at\s+(.+?)(?=\s+\(|\r?$)/gm) || []),
+    ...(message?.matchAll(/\bgit worktree add\s+([^\r\n]+)/g) || []).map(([, command]) => [null, worktreeAddPath(command)]),
+    ...(message?.matchAll(/^Work only inside\s+(\/[^\s()]+)(?=\s+\(a git worktree\b|\s+.*\bgit worktree\b)/gm) || []),
+    ...(message?.matchAll(/^Work inside the worktree\s+(\/[^\s()]+)/gm) || []),
+    ...(message?.matchAll(/\binside the git worktree at\s+(\/[^\s()]+)/gi) || [])
+  ]
+  for (const [, assigned] of directives) {
+    if (!assigned) continue
+    try {
+      const resolved = realpath(isAbsolute(assigned) ? assigned : resolve(roots[0], assigned))
+      if (roots.includes(resolved)) matches.add(resolved)
+    } catch {}
+  }
+  const worktree = matches.size === 1 ? [...matches][0] : null
+  cache.set(path, worktree)
+  return worktree
+}
+function subagentWorktree(payload, roots, cache) {
+  if (!payload.agent_id) return null
+  const paths = new Set()
+  if (typeof payload.transcript_path === 'string') paths.add(payload.transcript_path)
+  if (payload.session_id) {
+    const projects = join(homedir(), '.claude', 'projects')
+    try {
+      for (const project of readdirSync(projects)) {
+        const parent = join(projects, project, `${payload.session_id}.jsonl`)
+        const child = join(projects, project, payload.session_id, 'subagents', `agent-${payload.agent_id}.jsonl`)
+        if (existsSync(parent) && existsSync(child)) paths.add(child)
+      }
+    } catch {}
+  }
+  const matches = new Set([...paths].map(path => transcriptWorktree(path, roots, cache)).filter(Boolean))
+  return matches.size === 1 ? [...matches][0] : null
+}
 function runtimeMetadata(value, cli = null) {
   let model = scalarSlug(firstValue(value, ['model', 'model_name', 'modelName']))
   const effort = scalarSlug(firstValue(value, ['effort', 'reasoning_effort', 'effort_level']))
@@ -185,6 +247,7 @@ function recovered(roots, only, cache) {
 export function snapshot(cwd, only = null, options = {}) {
   const roots = trees(cwd)
   const transcriptCache = new Map()
+  const worktreeAssignmentCache = new Map()
   const eventsPath = join(common(cwd), 'agent-tree', 'events.jsonl')
   const events = (existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8').split('\n').filter(Boolean).flatMap(x => { try { return [JSON.parse(x)] } catch { return [] } }) : []).filter(x => x.at > Date.now() - 86400000)
   const transcripts = recovered(roots, only, transcriptCache)
@@ -219,7 +282,9 @@ export function snapshot(cwd, only = null, options = {}) {
     const p = row.payload || {}
     const id = p.agent_id || p.session_id
     if (!id) continue
-    const tree = worktrees.find(t => row.cwd === t.path || row.cwd?.startsWith(t.path + '/'))
+    const assignedWorktree = row.cli === 'claude-code' && row.event !== 'TeamMember' ? subagentWorktree(p, roots, worktreeAssignmentCache) : null
+    const eventCwd = assignedWorktree || row.cwd
+    const tree = worktrees.filter(t => eventCwd === t.path || eventCwd?.startsWith(t.path + '/')).sort((a, b) => b.path.length - a.path.length)[0]
     if (!tree) continue
     const key = `${row.cli}:${tree.path}:${id}`
     let node = byId.get(key)
@@ -299,14 +364,46 @@ export function render(data) {
   const dim = '\x1b[2m'
   const displayId = id => String(id).replace(/^([0-9a-f]{8})-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, '$1')
   const displayTitle = title => title?.length > 80 ? `${title.slice(0, 77)}…` : title
+  const nodes = new Map()
+  const treeByNode = new Map()
+  const index = (tree, node) => {
+    nodes.set(`${node.cli}:${node.id}`, node)
+    treeByNode.set(node, tree)
+    for (const child of node.children) index(tree, child)
+  }
+  for (const tree of data.worktrees) for (const node of tree.agents) index(tree, node)
+  const assigned = new Set()
+  const worktreesByParent = new Map()
+  for (const tree of data.worktrees) for (const node of tree.agents) {
+    const parent = node.parent && nodes.get(`${node.cli}:${node.parent}`)
+    if (!parent || treeByNode.get(parent) === tree) continue
+    assigned.add(node)
+    const key = `${node.cli}:${node.parent}`
+    if (!worktreesByParent.has(key)) worktreesByParent.set(key, new Map())
+    const groups = worktreesByParent.get(key)
+    if (!groups.has(tree)) groups.set(tree, [])
+    groups.get(tree).push(node)
+  }
+  const rendered = new Set()
   const visit = (node, prefix = '') => {
+    if (rendered.has(node)) return
+    rendered.add(node)
     const metadata = node.source === 'event' ? ` ${node.model}/${node.effort}` : ''
     const title = node.source === 'event' && node.title ? ` — ${displayTitle(node.title)}` : ''
     const sourceLimited = node.source === 'process' ? `${dim} (process only; runtime metadata unavailable)${reset}` : ''
     const parentUnknown = node.parentKnown ? '' : `${dim} (parent unknown)${reset}`
     lines.push(`${prefix}${statusMarker[node.status] || statusMarker.unknown} ${node.cli} ${displayId(node.id)}${metadata}${title}${parentUnknown}${sourceLimited}`)
     for (const child of node.children) visit(child, prefix + '  ')
+    for (const [tree, children] of worktreesByParent.get(`${node.cli}:${node.id}`) || []) {
+      lines.push(`${prefix}  ${tree.path}`)
+      for (const child of children) visit(child, prefix + '    ')
+    }
   }
-  for (const tree of data.worktrees) { lines.push(tree.path); for (const node of tree.agents) visit(node, '  ') }
+  for (const tree of data.worktrees) {
+    const topLevel = tree.agents.filter(node => !assigned.has(node))
+    if (!topLevel.length) continue
+    lines.push(tree.path)
+    for (const node of topLevel) visit(node, '  ')
+  }
   return lines.join('\n')
 }

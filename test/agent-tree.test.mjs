@@ -74,6 +74,22 @@ test('interactive rendering shortens UUIDs without changing other identifiers', 
   assert.doesNotMatch(output, /c21db08d-8424-4ef0-927a-0735221006ce/)
 })
 
+test('interactive rendering nests assigned worktrees under the actual cross-worktree parent', () => {
+  const event = (id, parent = null, children = [], parentKnown = true) => ({ cli: 'claude-code', id, parent, status: 'unknown', source: 'event', model: 'sonnet-5', effort: 'medium', parentKnown, children })
+  const rootChild = event('root-child', 'lead')
+  const lead = event('lead', null, [rootChild])
+  const assigned = event('assigned-child', 'lead')
+  const orphan = event('orphan', 'missing-parent', [], false)
+  const output = render({ worktrees: [
+    { path: '/repo', agents: [lead] },
+    { path: '/repo/.claude/worktrees/assigned', agents: [assigned] },
+    { path: '/repo/.claude/worktrees/unassigned', agents: [orphan] }
+  ] })
+  assert.match(output, /\/repo\n  \x1b\[2;90m\?\x1b\[0m claude-code lead sonnet-5\/medium\n    \x1b\[2;90m\?\x1b\[0m claude-code root-child sonnet-5\/medium\n    \/repo\/\.claude\/worktrees\/assigned\n      \x1b\[2;90m\?\x1b\[0m claude-code assigned-child sonnet-5\/medium/)
+  assert.match(output, /\/repo\/\.claude\/worktrees\/unassigned\n  \x1b\[2;90m\?\x1b\[0m claude-code orphan sonnet-5\/medium\x1b\[2m \(parent unknown\)\x1b\[0m/)
+  assert.doesNotMatch(output, /^\/repo\/\.claude\/worktrees\/assigned/m)
+})
+
 test('normalizes Claude metadata, recovers transcripts, nests subagents, and prunes live nodes', () => {
   const main = repo(), transcript = join(main, 'claude.jsonl')
   try {
@@ -161,8 +177,42 @@ test('Claude team members use configured repository worktrees and otherwise stay
     const assignedTree = data.worktrees.find(tree => tree.path === realpathSync(assigned))
     assert.deepEqual(assignedTree.agents.map(node => node.id), ['assigned'])
     assert.deepEqual(mainTree.agents.find(node => node.id === 'lead').children.map(node => node.id).sort(), ['missing-path', 'outside-repo'])
-    assert.match(render(data), new RegExp(`${realpathSync(assigned)}\\n  \\x1b\\[2;90m\\?\\x1b\\[0m claude-code assigned`))
+    assert.match(render(data), new RegExp(`\\n    ${realpathSync(assigned)}\\n      \\x1b\\[2;90m\\?\\x1b\\[0m claude-code assigned`))
   } finally { cleanup(home, assigned, main) }
+})
+
+test('Claude subagent transcripts explicitly assign one repository worktree', () => {
+  const main = repo(), assigned = join(main, '.claude', 'worktrees', 'assigned'), other = worktree(main, 'other'), home = temp(), unknown = temp()
+  try {
+    mkdirSync(join(main, '.claude', 'worktrees'), { recursive: true })
+    assert.equal(run('git', ['worktree', 'add', '-b', 'assigned', assigned], main).status, 0)
+    const session = 'lead'
+    const subagents = join(home, '.claude', 'projects', 'fixture-project', session, 'subagents')
+    mkdirSync(subagents, { recursive: true })
+    writeFileSync(join(home, '.claude', 'projects', 'fixture-project', `${session}.jsonl`), '{}\n')
+    const transcript = (agent, content) => writeFileSync(join(subagents, `agent-${agent}.jsonl`), JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n')
+    transcript('assigned', `Work in git worktree at ${assigned} (branch assigned).\nDo the task.`)
+    transcript('current-format', `Worktree: ${assigned}\nFirst: EnterWorktree with path=${assigned} before inspecting files.`)
+    transcript('enter-worktree', `First: EnterWorktree with path=${assigned} before inspecting files.`)
+    transcript('git-add-relative', 'Create it with git worktree add .claude/worktrees/assigned topic/assigned before starting.')
+    transcript('git-add-absolute', `Use git worktree add -b assigned-copy ${assigned} topic/assigned before starting.`)
+    transcript('work-only', `Work only inside ${assigned} (a git worktree created for this task).`)
+    transcript('work-inside', `Work inside the worktree ${assigned}`)
+    transcript('inside-git-worktree', `You are implementing this task inside the git worktree at ${assigned} (branch assigned).`)
+    transcript('no-assignment', `Please inspect the worktree at ${assigned}, but do not change directories.`)
+    transcript('unknown-path', `Work in git worktree at ${unknown}`)
+    transcript('two-assignments', `Work in git worktree at ${assigned}\nWork in git worktree at ${other}`)
+    spawnSync('node', [tool('agent-tree'), '_event', 'SessionStart', 'claude-code'], { cwd: main, input: JSON.stringify({ cwd: main, session_id: session }) })
+    for (const agent_id of ['assigned', 'current-format', 'enter-worktree', 'git-add-relative', 'git-add-absolute', 'work-only', 'work-inside', 'inside-git-worktree', 'no-assignment', 'unknown-path', 'two-assignments']) {
+      spawnSync('node', [tool('agent-tree'), '_event', 'SubagentStart', 'claude-code'], { cwd: main, input: JSON.stringify({ cwd: main, session_id: session, agent_id }) })
+    }
+    const data = JSON.parse(run(tool('agent-tree'), ['--json', '--claude-code'], main, { HOME: home }).stdout)
+    const mainTree = data.worktrees.find(tree => tree.path === realpathSync(main))
+    const assignedTree = data.worktrees.find(tree => tree.path === realpathSync(assigned))
+    assert.deepEqual(assignedTree.agents.map(node => node.id).sort(), ['assigned', 'current-format', 'enter-worktree', 'git-add-absolute', 'git-add-relative', 'inside-git-worktree', 'work-inside', 'work-only'])
+    assert.deepEqual(mainTree.agents.find(node => node.id === session).children.map(node => node.id).sort(), ['no-assignment', 'two-assignments', 'unknown-path'])
+    assert.match(render(data), new RegExp(`\\n    ${realpathSync(assigned)}\\n      \\x1b\\[2;90m\\?\\x1b\\[0m claude-code assigned`))
+  } finally { cleanup(unknown, home, other, assigned, main) }
 })
 
 test('recovers Codex thread settings after initial session metadata', () => {
