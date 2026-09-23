@@ -232,6 +232,23 @@ test('recovers Codex thread settings after initial session metadata', () => {
   } finally { cleanup(home, main) }
 })
 
+test('Claude session model follows the transcript after /model, not the SessionStart payload', () => {
+  const main = repo(), home = temp()
+  try {
+    assert.equal(run(join(root, 'link.sh'), [main]).status, 0)
+    const project = join(home, '.claude', 'projects', 'p')
+    mkdirSync(project, { recursive: true })
+    const transcript = join(project, 'switched.jsonl')
+    writeFileSync(transcript, JSON.stringify({ type: 'assistant', sessionId: 'switched', cwd: main, effort: 'xhigh', message: { model: 'claude-opus-5-5' } }) + '\n')
+    const event = { cwd: main, session_id: 'switched', transcript_path: transcript, model: 'claude-sonnet-5', effort: 'high' }
+    spawnSync('node', [tool('agent-tree'), '_event', 'SessionStart', 'claude-code'], { cwd: main, input: JSON.stringify(event), env: { ...process.env, HOME: home } })
+    const data = JSON.parse(run(tool('agent-tree'), ['--json', '--claude-code'], main, { HOME: home }).stdout)
+    const session = data.worktrees[0].agents.find(node => node.id === 'switched')
+    assert.equal(session.model, 'opus-5-5')
+    assert.equal(session.effort, 'xhigh')
+  } finally { cleanup(home, main) }
+})
+
 test('refuses malformed hook configuration instead of overwriting it', () => {
   const main = repo()
   try {

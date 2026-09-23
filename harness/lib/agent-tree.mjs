@@ -291,9 +291,12 @@ export function snapshot(cwd, only = null, options = {}) {
     const directMetadata = runtimeMetadata(p, row.cli)
     const pathMetadata = p.transcript_path ? transcriptMetadata(p.transcript_path, row.cli, transcriptCache) : {}
     const recoveredMetadata = transcriptBySession.get(`${row.cli}:${p.session_id}`)?.payload || {}
+    // A session's hook payload carries the model it STARTED on; /model changes it later
+    // and only the transcript records that. Subagent payloads point at the parent transcript.
+    const sources = p.agent_id ? [directMetadata, pathMetadata, recoveredMetadata] : [pathMetadata, recoveredMetadata, directMetadata]
     const metadata = {
-      model: directMetadata.model ?? pathMetadata.model ?? recoveredMetadata.model,
-      effort: directMetadata.effort ?? pathMetadata.effort ?? recoveredMetadata.effort
+      model: sources.map(x => x.model).find(x => x !== undefined),
+      effort: sources.map(x => x.effort).find(x => x !== undefined)
     }
     const title = taskTitle(p) ?? titles.get(`${row.cli}:${id}`)
     if (!node) {
