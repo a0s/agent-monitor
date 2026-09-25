@@ -45,7 +45,7 @@ test('interactive rendering shortens UUIDs without changing other identifiers', 
     { cli: 'claude-code', id: 'aceefdf3359141526', status: 'stopped', source: 'event', model: 'sonnet-5', effort: 'medium', parentKnown: true, children: [] }
   ] }] })
   assert.match(output, /claude-code c21db08d sonnet-5\/medium — Implement account endpoint/)
-  assert.match(output, /claude-code aceefdf3359141526 sonnet-5\/medium/)
+  assert.match(output, /claude-code aceefdf3 sonnet-5\/medium/)
   assert.doesNotMatch(output, /c21db08d-8424-4ef0-927a-0735221006ce/)
 })
 

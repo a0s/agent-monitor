@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.1] - 2026-09-26
+
+- Subagent ids are shortened to 8 characters, like session ids, so the tree
+  lines up.
+
 ## [0.1.0] - 2026-09-26
 
 First release as a project of its own; previously `agent-tree` in
