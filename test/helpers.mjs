@@ -4,16 +4,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export const root = new URL('..', import.meta.url).pathname
-export const tool = name => join(root, 'harness', 'bin', name)
+// Never read the real ~/.claude or ~/.codex: a test sees only the transcripts it writes.
+process.env.HOME = mkdtempSync(join(tmpdir(), 'agent-monitor-home-'))
+// Hooks record here whatever HOME a test gives the tool.
+process.env.AGENT_MONITOR_HOME = mkdtempSync(join(tmpdir(), 'agent-monitor-state-'))
+export const tool = name => join(root, 'bin', name)
 export function run(cmd, args = [], cwd = root, env = {}) {
   return spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 10000 })
 }
-export function temp() { return mkdtempSync(join(tmpdir(), 'harness-v2-')) }
+export function temp() { return mkdtempSync(join(tmpdir(), 'agent-monitor-')) }
 export function repo() {
   const dir = temp()
   run('git', ['init', '-b', 'main', dir])
   run('git', ['config', 'user.email', 'test@example.invalid'], dir)
-  run('git', ['config', 'user.name', 'Harness Test'], dir)
+  run('git', ['config', 'user.name', 'agent-monitor test'], dir)
   writeFileSync(join(dir, 'README.md'), 'fixture\n')
   run('git', ['add', 'README.md'], dir)
   run('git', ['commit', '-m', 'base'], dir)

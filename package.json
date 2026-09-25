@@ -1,0 +1,14 @@
+{
+  "name": "agent-monitor",
+  "version": "0.1.0",
+  "description": "A live tree of the Codex and Claude Code sessions, subagents and teammates working in a repository",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": { "agent-monitor": "bin/agent-monitor" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check bin/agent-monitor && node --check lib/agent-monitor.mjs"
+  },
+  "engines": { "node": ">=20" }
+}

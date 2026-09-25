@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { installHooks, removeHooks, record, snapshot, render } from '../lib/agent-monitor.mjs'
+
+const usage = `usage: agent-monitor [--codex|--claude-code] [--json]
+       agent-monitor --install-hooks [config-folder...]
+       agent-monitor --remove-hooks [config-folder...]
+       agent-monitor --version
+
+Shows every Codex and Claude Code session, subagent and teammate working in the
+Git repository (all of its worktrees) or folder you run it from. Nothing has to
+be installed: sessions are read from local transcripts and processes, in
+~/.claude*, ~/.codex*, $CLAUDE_CONFIG_DIR and $CODEX_HOME.
+
+Hooks are optional. They record starts and stops as they happen, for a more
+exact status. A config folder is a Claude or Codex one: ~/.claude, a second
+account's ~/.claude-work, ~/.codex, or a project's own .claude or .codex.
+  --install-hooks   into the folders named, or ~/.claude and ~/.codex
+  --remove-hooks    from the folders named, or from everywhere they were installed`
+
+const argv = process.argv.slice(2)
+try {
+  if (argv[0] === '_event') {
+    record(argv[1], argv[2])
+    if (argv[1] === 'SubagentStop') process.stdout.write('{}\n')
+  } else if (argv[0] === '--install-hooks') {
+    // The path this was started by, unresolved: Homebrew's bin link outlives an upgrade.
+    for (const { path } of installHooks(argv.slice(1), resolve(process.argv[1]))) process.stdout.write(`hooks installed in ${path}\n`)
+    process.stdout.write('Codex may ask you to trust the new hooks once, under /hooks.\n')
+  } else if (argv[0] === '--remove-hooks') {
+    const removed = removeHooks(argv.slice(1))
+    for (const path of removed) process.stdout.write(`hooks removed from ${path}\n`)
+    if (!removed.length) process.stdout.write('no agent-monitor hooks found\n')
+  } else if (argv.includes('--version')) {
+    const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+    process.stdout.write(`agent-monitor ${version}\n`)
+  } else if (argv.includes('--help') || argv.includes('-h')) {
+    process.stdout.write(usage + '\n')
+  } else {
+    const json = argv.includes('--json')
+    const only = argv.includes('--codex') ? 'codex' : argv.includes('--claude-code') ? 'claude-code' : null
+    if (argv.some(x => !['--json', '--codex', '--claude-code'].includes(x)) || (argv.includes('--codex') && argv.includes('--claude-code'))) throw Error(usage)
+    const show = () => {
+      const data = snapshot(process.cwd(), only)
+      if (json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n')
+      const view = render(data) || `No ${only || 'Codex or Claude Code'} agents in the last 15 minutes under:\n${data.worktrees.map(tree => `  ${tree.path}`).join('\n')}`
+      process.stdout.write('\x1b[2J\x1b[H' + view + '\n')
+    }
+    show()
+    if (!json) setInterval(show, 2000)
+  }
+} catch (error) { console.error(error.message === usage ? usage : `agent-monitor: ${error.message}`); process.exitCode = 1 }
