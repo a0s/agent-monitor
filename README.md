@@ -27,6 +27,7 @@ started before it, and for agents started by anyone's tooling.
 Homebrew, on macOS and Linux:
 
 ```sh
+brew trust a0s/agent-monitor    # Homebrew 7 loads formulae only from trusted taps
 brew install a0s/agent-monitor/agent-monitor
 ```
 
