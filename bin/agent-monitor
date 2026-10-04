@@ -1,17 +1,18 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { installHooks, removeHooks, record, snapshot, render } from '../lib/agent-monitor.mjs'
 
-const usage = `usage: agent-monitor [--codex|--claude-code] [--json]
+const usage = `usage: agent-monitor [folder] [--codex|--claude-code] [--json] [--short]
        agent-monitor --install-hooks [config-folder...]
        agent-monitor --remove-hooks [config-folder...]
        agent-monitor --version
 
 Shows every Codex and Claude Code session, subagent and teammate working in the
-Git repository (all of its worktrees) or folder you run it from. Nothing has to
-be installed: sessions are read from local transcripts and processes, in
-~/.claude*, ~/.codex*, $CLAUDE_CONFIG_DIR and $CODEX_HOME.
+Git repository (all of its worktrees) or folder you run it from, or in the
+folder named on the command line instead. Nothing has to be installed:
+sessions are read from local transcripts and processes, in ~/.claude*,
+~/.codex*, $CLAUDE_CONFIG_DIR and $CODEX_HOME.
 
 Hooks are optional. They record starts and stops as they happen, for a more
 exact status. A config folder is a Claude or Codex one: ~/.claude, a second
@@ -39,12 +40,20 @@ try {
     process.stdout.write(usage + '\n')
   } else {
     const json = argv.includes('--json')
+    const short = argv.includes('--short')
     const only = argv.includes('--codex') ? 'codex' : argv.includes('--claude-code') ? 'claude-code' : null
-    if (argv.some(x => !['--json', '--codex', '--claude-code'].includes(x)) || (argv.includes('--codex') && argv.includes('--claude-code'))) throw Error(usage)
+    const positional = argv.filter(x => !['--json', '--short', '--codex', '--claude-code'].includes(x))
+    if (positional.some(x => x.startsWith('-')) || positional.length > 1 || (argv.includes('--codex') && argv.includes('--claude-code'))) throw Error(usage)
+    let cwd = process.cwd()
+    if (positional.length) {
+      cwd = resolve(cwd, positional[0])
+      let stat; try { stat = statSync(cwd) } catch { throw Error(`no such folder: ${cwd}`) }
+      if (!stat.isDirectory()) throw Error(`not a folder: ${cwd}`)
+    }
     const show = () => {
-      const data = snapshot(process.cwd(), only)
+      const data = snapshot(cwd, only)
       if (json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n')
-      const view = render(data) || `No ${only || 'Codex or Claude Code'} agents in the last 15 minutes under:\n${data.worktrees.map(tree => `  ${tree.path}`).join('\n')}`
+      const view = render(data, { short }) || `No ${only || 'Codex or Claude Code'} agents in the last 15 minutes under:\n${data.worktrees.map(tree => `  ${tree.path}`).join('\n')}`
       process.stdout.write('\x1b[2J\x1b[H' + view + '\n')
     }
     show()

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0] - 2026-10-04
+
+- `agent-monitor [folder]` watches a named folder instead of the one it was
+  run from; flags can go before or after it. `--install-hooks` and
+  `--remove-hooks` keep their own, unrelated positional folders.
+- `--short` fits a narrow terminal: each line is cut down to the status mark,
+  owner (`claude` or `codex`) and model/effort, dropping ids and titles. No
+  effect with `--json`.
+
 ## [0.1.1] - 2026-09-26
 
 - Subagent ids are shortened to 8 characters, like session ids, so the tree

@@ -45,15 +45,21 @@ agent-monitor                  # live view, refreshed every two seconds; Ctrl-C 
 agent-monitor --claude-code    # only Claude Code
 agent-monitor --codex          # only Codex
 agent-monitor --json           # one machine-readable snapshot
+agent-monitor --short          # status, owner, model/effort only — no ids or titles
+agent-monitor ~/src/other-shop # watch that folder instead of the one you're in
 ```
 
 Inside a Git repository it watches every worktree of it; anywhere else, that
-folder and everything below it.
+folder and everything below it. Name a folder on the command line to watch it
+instead of the one you're running from; flags can go before or after it.
 
 `●` running, `○` stopped, `?` seen recently but not confirmed. Stopped agents
 drop out of the view; `parent unknown` means the runtime did not say who
 started an agent, and `process only` marks a process with no transcript behind
 it.
+
+`--short` fits a narrow terminal: each line is cut down to the status mark,
+owner (`claude` or `codex`) and model/effort, dropping ids and titles.
 
 Transcripts are found in `~/.claude`, `~/.codex`, `$CLAUDE_CONFIG_DIR`,
 `$CODEX_HOME`, and any other `~/.claude*` or `~/.codex*` folder that holds them

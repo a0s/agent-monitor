@@ -49,6 +49,21 @@ test('interactive rendering shortens UUIDs without changing other identifiers', 
   assert.doesNotMatch(output, /c21db08d-8424-4ef0-927a-0735221006ce/)
 })
 
+test('short rendering drops ids and titles, keeps marks, indentation and shortened owner', () => {
+  const output = render({ worktrees: [{ path: '/workspace', agents: [
+    { cli: 'claude-code', id: 'lead', status: 'running', source: 'event', model: 'fable-5-1', effort: 'medium', parentKnown: true, children: [
+      { cli: 'claude-code', id: 'a9b50962', status: 'unknown', source: 'event', model: 'sonnet-5', effort: 'medium', title: 'Fix mold ring rejection', parentKnown: true, children: [] }
+    ] },
+    { cli: 'codex', id: 'pid:12', status: 'stopped', source: 'process', parentKnown: true, children: [] }
+  ] }] }, { short: true })
+  assert.equal(output, [
+    '/workspace',
+    '  \x1b[32m●\x1b[0m claude fable-5-1/medium',
+    '    \x1b[2;90m?\x1b[0m claude sonnet-5/medium',
+    '  \x1b[2;90m○\x1b[0m codex'
+  ].join('\n'))
+})
+
 test('interactive rendering nests assigned worktrees under the actual cross-worktree parent', () => {
   const event = (id, parent = null, children = [], parentKnown = true) => ({ cli: 'claude-code', id, parent, status: 'unknown', source: 'event', model: 'sonnet-5', effort: 'medium', parentKnown, children })
   const rootChild = event('root-child', 'lead')
@@ -291,6 +306,74 @@ test('outside a Git repository the folder itself is watched', () => {
     assert.deepEqual(data.worktrees.map(tree => tree.path), [dir])
     assert.equal(data.worktrees[0].agents[0].id, 'plain')
   } finally { cleanup(home, dir) }
+})
+
+test('a folder argument is watched instead of the process cwd, with flags on either side', () => {
+  const main = repo()
+  try {
+    const fromCwd = JSON.parse(run(tool('agent-monitor'), ['--json'], main).stdout)
+    const flagAfter = JSON.parse(run(tool('agent-monitor'), [main, '--json'], root).stdout)
+    const flagBefore = JSON.parse(run(tool('agent-monitor'), ['--json', main], root).stdout)
+    assert.deepEqual(flagAfter, fromCwd)
+    assert.deepEqual(flagBefore, fromCwd)
+  } finally { cleanup(main) }
+})
+
+test('--short has no effect on --json output, in any flag order, and combines with a folder', () => {
+  const main = repo()
+  try {
+    const plain = JSON.parse(run(tool('agent-monitor'), ['--json'], main).stdout)
+    const shortAfter = JSON.parse(run(tool('agent-monitor'), ['--json', '--short'], main).stdout)
+    const shortBefore = JSON.parse(run(tool('agent-monitor'), ['--short', '--json'], main).stdout)
+    const shortWithFolder = JSON.parse(run(tool('agent-monitor'), [main, '--short', '--json'], root).stdout)
+    assert.deepEqual(shortAfter, plain)
+    assert.deepEqual(shortBefore, plain)
+    assert.deepEqual(shortWithFolder, plain)
+  } finally { cleanup(main) }
+})
+
+test('a nonexistent or non-folder argument fails without a stack trace', () => {
+  const missing = join(temp(), 'does-not-exist')
+  const notAFolder = temp()
+  try {
+    const result = run(tool('agent-monitor'), [missing, '--json'], root)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /^agent-monitor: no such folder: /)
+    assert.equal(result.stdout, '')
+
+    const file = join(notAFolder, 'file.txt')
+    writeFileSync(file, 'x')
+    const fileResult = run(tool('agent-monitor'), [file, '--json'], root)
+    assert.notEqual(fileResult.status, 0)
+    assert.match(fileResult.stderr, /^agent-monitor: not a folder: /)
+  } finally { cleanup(missing, notAFolder) }
+})
+
+test('more than one folder argument in monitor mode is a usage error', () => {
+  const a = temp(), b = temp()
+  try {
+    const result = run(tool('agent-monitor'), [a, b, '--json'], root)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /^usage: agent-monitor/)
+  } finally { cleanup(a, b) }
+})
+
+test('a folder argument does not change --install-hooks or --remove-hooks semantics', () => {
+  const main = repo(), home = temp()
+  try {
+    const claude = join(home, '.claude-work'), codex = join(home, '.codex')
+    mkdirSync(join(claude, 'projects'), { recursive: true })
+    mkdirSync(codex, { recursive: true }); writeFileSync(join(codex, 'config.toml'), '')
+    const env = { HOME: home }
+    const installed = run(tool('agent-monitor'), ['--install-hooks', claude, codex], main, env)
+    assert.equal(installed.status, 0, installed.stderr)
+    assert.ok(existsSync(join(claude, 'settings.json')))
+    assert.ok(existsSync(join(codex, 'hooks.json')))
+    const removed = run(tool('agent-monitor'), ['--remove-hooks', claude, codex], main, env)
+    assert.equal(removed.status, 0, removed.stderr)
+    assert.equal(existsSync(join(claude, 'settings.json')), false)
+    assert.equal(existsSync(join(codex, 'hooks.json')), false)
+  } finally { cleanup(home, main) }
 })
 
 test('hooks install into any config folder, replace the harness-supervisor copy, and come off everywhere', () => {
