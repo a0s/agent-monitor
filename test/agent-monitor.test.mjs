@@ -275,6 +275,32 @@ test('without hooks, Claude subagents come from transcripts and run while their 
   } finally { cleanup(home, main) }
 })
 
+test('a session whose own hook events aged out is still read from its transcript beside fresh subagent events', () => {
+  const main = repo(), home = temp()
+  const events = join(process.env.AGENT_MONITOR_HOME, 'events.jsonl')
+  const before = existsSync(events) ? readFileSync(events, 'utf8') : ''
+  try {
+    const project = join(home, '.claude', 'projects', 'p')
+    const subagents = join(project, 'lead', 'subagents')
+    mkdirSync(subagents, { recursive: true })
+    const cwd = realpathSync(main)
+    const lines = rows => rows.map(row => JSON.stringify({ cwd, sessionId: 'lead', ...row })).join('\n') + '\n'
+    writeFileSync(join(project, 'lead.jsonl'), lines([{ type: 'user', message: { role: 'user', content: 'go' } }, { type: 'assistant', message: { model: 'claude-fable-5-1', stop_reason: 'tool_use' } }]))
+    writeFileSync(join(subagents, 'agent-busy.jsonl'), lines([{ agentId: 'busy', type: 'user', message: { role: 'user', content: 'task' } }, { agentId: 'busy', type: 'assistant', message: { model: 'claude-sonnet-5', stop_reason: 'tool_use' } }]))
+    // SessionStart is older than a day; only the subagent's start is recent.
+    appendFileSync(events, JSON.stringify({ at: Date.now() - 60000, event: 'SubagentStart', cli: 'claude-code', cwd, payload: { session_id: 'lead', agent_id: 'busy', agent_type: 'worker' } }) + '\n')
+    const env = process.env.HOME
+    process.env.HOME = home
+    let data
+    try { data = snapshot(main, null, { processes: [{ pid: 7, command: 'claude', cwd }] }) } finally { process.env.HOME = env }
+    const agents = data.worktrees[0].agents
+    assert.deepEqual(agents.map(node => node.id), ['lead'])
+    assert.equal(agents[0].status, 'running')
+    assert.equal(agents[0].model, 'fable-5-1')
+    assert.deepEqual(agents[0].children.map(node => [node.id, node.status]), [['busy', 'running']])
+  } finally { writeFileSync(events, before); cleanup(home, main) }
+})
+
 test('without hooks, Codex subagent threads nest under their parent thread', () => {
   const main = repo(), home = temp()
   try {

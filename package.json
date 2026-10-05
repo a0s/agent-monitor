@@ -1,6 +1,6 @@
 {
   "name": "agent-monitor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A live tree of the Codex and Claude Code sessions, subagents and teammates working in a repository",
   "license": "MIT",
   "private": true,

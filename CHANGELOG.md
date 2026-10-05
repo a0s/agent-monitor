@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-10-05
+
+- A session running longer than a day no longer drops out of the tree while
+  its subagents are active: their hook events no longer stand in for the
+  session's own, so its transcript is read again. Before, the session showed
+  as `process only` and its subagents as unknown.
+
 ## [0.2.0] - 2026-10-04
 
 - `agent-monitor [folder]` watches a named folder instead of the one it was
