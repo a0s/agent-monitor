@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3] - 2026-10-14
+
+- The process list is taken every six seconds instead of on every two-second
+  refresh, and `lsof` is asked only about processes not seen before (a known
+  one again every thirty seconds). On Linux processes and their working
+  directories are read from `/proc`, so no `ps` is started at all. A process
+  that starts or ends now shows up to six seconds later.
+
 ## [0.2.2] - 2026-10-14
 
 - A refresh costs about a sixth of the CPU it did. A subagent's own transcript

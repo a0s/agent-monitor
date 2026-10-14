@@ -11,10 +11,13 @@ agent belongs to the worktree its working directory is in.
 
 ## Where it looks
 
-Nothing has to be installed into a project. Every two seconds it reads:
+Nothing has to be installed into a project. Every two seconds it reads the
+transcripts below; the process list is taken every six seconds.
 
-- **Processes.** One `ps` for every `claude` and `codex` process, one `lsof`
-  (or `/proc` on Linux) for their working directories. A process confirms that
+- **Processes.** On Linux, `/proc` gives every `claude` and `codex` process and
+  its working directory without starting anything. Elsewhere, one `ps` lists
+  them and one `lsof` gives the working directory of each process not seen
+  before; a known process is asked again every thirty seconds. A process confirms that
   the newest session in its worktree is running. Claude `bg-spare` helper
   processes are ignored. A process with no transcript behind it is still shown,
   marked `process only`.
