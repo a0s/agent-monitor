@@ -200,6 +200,26 @@ test('Claude subagent transcripts explicitly assign one repository worktree', ()
   } finally { cleanup(unknown, home, other, assigned, main) }
 })
 
+test('a hook payload finds the subagent transcript beside the parent one it names', () => {
+  const main = repo(), assigned = join(main, '.claude', 'worktrees', 'assigned'), home = temp()
+  try {
+    mkdirSync(join(main, '.claude', 'worktrees'), { recursive: true })
+    assert.equal(run('git', ['worktree', 'add', '-b', 'assigned', assigned], main).status, 0)
+    const session = 'lead', project = join(home, '.claude', 'projects', 'fixture-project')
+    const subagents = join(project, session, 'subagents')
+    mkdirSync(subagents, { recursive: true })
+    const parent = join(project, `${session}.jsonl`)
+    writeFileSync(parent, '{}\n')
+    for (const agent of ['by-parent', 'by-own-path']) writeFileSync(join(subagents, `agent-${agent}.jsonl`), JSON.stringify({ type: 'user', message: { role: 'user', content: `Worktree: ${assigned}` } }) + '\n')
+    const event = payload => spawnSync('node', [tool('agent-monitor'), '_event', 'SubagentStart', 'claude-code'], { cwd: main, input: JSON.stringify({ cwd: main, session_id: session, ...payload }) })
+    event({ agent_id: 'by-parent', transcript_path: parent })
+    event({ agent_id: 'by-own-path', transcript_path: parent, agent_transcript_path: join(subagents, 'agent-by-own-path.jsonl') })
+    event({ agent_id: 'no-transcript', transcript_path: parent })
+    const data = JSON.parse(run(tool('agent-monitor'), ['--json', '--claude-code'], main, { HOME: home }).stdout)
+    assert.deepEqual(data.worktrees.find(tree => tree.path === realpathSync(assigned)).agents.map(node => node.id).sort(), ['by-own-path', 'by-parent'])
+    assert.deepEqual(data.worktrees.find(tree => tree.path === realpathSync(main)).agents.map(node => node.id), ['no-transcript'])
+  } finally { cleanup(home, assigned, main) }
+})
 test('recovers Codex thread settings after initial session metadata', () => {
   const main = repo(), home = temp()
   try {

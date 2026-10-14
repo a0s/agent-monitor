@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.2] - 2026-10-14
+
+- A refresh costs about a sixth of the CPU it did. A subagent's own transcript
+  is looked up beside the parent transcript its hook event names, instead of
+  in every project folder once for each event; with a day of hook events that
+  search took most of every refresh and kept the monitor near a quarter of a
+  core.
+
 ## [0.2.1] - 2026-10-05
 
 - A session running longer than a day no longer drops out of the tree while
