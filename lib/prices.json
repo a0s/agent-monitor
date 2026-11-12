@@ -1,0 +1,412 @@
+{
+  "at": 1794524101592,
+  "claude": {
+    "fable-5-2": {
+      "input": 8,
+      "write5m": 10,
+      "write1h": 16,
+      "read": 0.2,
+      "output": 40,
+      "fast": 2
+    },
+    "mythos-5-2": {
+      "input": 8,
+      "write5m": 10,
+      "write1h": 16,
+      "read": 0.2,
+      "output": 40,
+      "fast": 2
+    },
+    "fable-5-1": {
+      "input": 10,
+      "write5m": 12.5,
+      "write1h": 20,
+      "read": 0.25,
+      "output": 50
+    },
+    "mythos-5-1": {
+      "input": 10,
+      "write5m": 12.5,
+      "write1h": 20,
+      "read": 0.25,
+      "output": 50
+    },
+    "fable-5": {
+      "input": 10,
+      "write5m": 12.5,
+      "write1h": 20,
+      "read": 1,
+      "output": 50
+    },
+    "mythos-5": {
+      "input": 10,
+      "write5m": 12.5,
+      "write1h": 20,
+      "read": 1,
+      "output": 50
+    },
+    "opus-5-5": {
+      "input": 4,
+      "write5m": 5,
+      "write1h": 8,
+      "read": 0.2,
+      "output": 20,
+      "fast": 2
+    },
+    "opus-5": {
+      "input": 5,
+      "write5m": 6.25,
+      "write1h": 10,
+      "read": 0.5,
+      "output": 25,
+      "fast": 2
+    },
+    "opus-4-8": {
+      "input": 5,
+      "write5m": 6.25,
+      "write1h": 10,
+      "read": 0.5,
+      "output": 25,
+      "fast": 2
+    },
+    "opus-4-7": {
+      "input": 5,
+      "write5m": 6.25,
+      "write1h": 10,
+      "read": 0.5,
+      "output": 25
+    },
+    "opus-4-6": {
+      "input": 5,
+      "write5m": 6.25,
+      "write1h": 10,
+      "read": 0.5,
+      "output": 25
+    },
+    "opus-4-5": {
+      "input": 5,
+      "write5m": 6.25,
+      "write1h": 10,
+      "read": 0.5,
+      "output": 25
+    },
+    "opus-4-1": {
+      "input": 15,
+      "write5m": 18.75,
+      "write1h": 30,
+      "read": 1.5,
+      "output": 75
+    },
+    "opus-4": {
+      "input": 15,
+      "write5m": 18.75,
+      "write1h": 30,
+      "read": 1.5,
+      "output": 75
+    },
+    "sonnet-5-5": {
+      "input": 2,
+      "write5m": 2.5,
+      "write1h": 4,
+      "read": 0.1,
+      "output": 10
+    },
+    "sonnet-5": {
+      "input": 2,
+      "write5m": 2.5,
+      "write1h": 4,
+      "read": 0.2,
+      "output": 10
+    },
+    "sonnet-4-6": {
+      "input": 3,
+      "write5m": 3.75,
+      "write1h": 6,
+      "read": 0.3,
+      "output": 15
+    },
+    "sonnet-4-5": {
+      "input": 3,
+      "write5m": 3.75,
+      "write1h": 6,
+      "read": 0.3,
+      "output": 15
+    },
+    "sonnet-4": {
+      "input": 3,
+      "write5m": 3.75,
+      "write1h": 6,
+      "read": 0.3,
+      "output": 15
+    },
+    "haiku-5-5": {
+      "input": 0.1,
+      "write5m": 0.125,
+      "write1h": 0.2,
+      "read": 0.01,
+      "output": 0.5,
+      "over": [
+        100000,
+        {
+          "input": 0.5,
+          "write5m": 0.625,
+          "write1h": 1,
+          "read": 0.05,
+          "output": 2.5
+        }
+      ]
+    },
+    "haiku-4-5": {
+      "input": 1,
+      "write5m": 1.25,
+      "write1h": 2,
+      "read": 0.1,
+      "output": 5
+    }
+  },
+  "openai": {
+    "gpt-6-astra": {
+      "input": 10,
+      "output": 50,
+      "read": 1,
+      "write": 12.5,
+      "fast": 2
+    },
+    "gpt-6.1-sol": {
+      "input": 2,
+      "output": 10,
+      "read": 0.1,
+      "write": 2.5,
+      "fast": 2
+    },
+    "gpt-6.1-terra": {
+      "input": 1,
+      "output": 5,
+      "read": 0.05,
+      "write": 1.25,
+      "fast": 2
+    },
+    "gpt-6-luna": {
+      "input": 0.1,
+      "output": 0.5,
+      "read": 0.01,
+      "write": 0.125,
+      "fast": 2
+    },
+    "gpt-6-sol": {
+      "input": 2,
+      "output": 10,
+      "read": 0.2,
+      "write": 2.5,
+      "fast": 2
+    },
+    "gpt-5.6-sol": {
+      "input": 4,
+      "output": 20,
+      "read": 0.4,
+      "write": 5,
+      "fast": 2
+    },
+    "gpt-5.6-terra": {
+      "input": 2,
+      "output": 12,
+      "read": 0.2,
+      "write": 2.5,
+      "fast": 2
+    },
+    "gpt-5.6-luna": {
+      "input": 0.2,
+      "output": 1.2,
+      "read": 0.02,
+      "write": 0.25,
+      "fast": 2
+    },
+    "gpt-5.5": {
+      "input": 5,
+      "output": 30,
+      "read": 0.5,
+      "write": 5,
+      "fast": 2.5
+    },
+    "gpt-5.5-pro": {
+      "input": 30,
+      "output": 180,
+      "read": 30,
+      "write": 30
+    },
+    "gpt-5.4": {
+      "input": 2.5,
+      "output": 15,
+      "read": 0.25,
+      "write": 2.5,
+      "fast": 2
+    },
+    "gpt-5.4-pro": {
+      "input": 30,
+      "output": 180,
+      "read": 30,
+      "write": 30
+    },
+    "gpt-5.4-mini": {
+      "input": 0.75,
+      "output": 4.5,
+      "read": 0.075,
+      "write": 0.75,
+      "fast": 2
+    },
+    "gpt-5.4-nano": {
+      "input": 0.2,
+      "output": 1.25,
+      "read": 0.02,
+      "write": 0.2
+    },
+    "gpt-5.2": {
+      "input": 1.75,
+      "output": 14,
+      "read": 0.175,
+      "write": 1.75,
+      "fast": 2
+    },
+    "gpt-5.2-pro": {
+      "input": 21,
+      "output": 168,
+      "read": 21,
+      "write": 21
+    },
+    "gpt-5.1": {
+      "input": 1.25,
+      "output": 10,
+      "read": 0.125,
+      "write": 1.25,
+      "fast": 2
+    },
+    "gpt-5": {
+      "input": 1.25,
+      "output": 10,
+      "read": 0.125,
+      "write": 1.25,
+      "fast": 2
+    },
+    "gpt-5-mini": {
+      "input": 0.25,
+      "output": 2,
+      "read": 0.025,
+      "write": 0.25,
+      "fast": 1.8
+    },
+    "gpt-5-nano": {
+      "input": 0.05,
+      "output": 0.4,
+      "read": 0.005,
+      "write": 0.05
+    },
+    "gpt-5-pro": {
+      "input": 15,
+      "output": 120,
+      "read": 15,
+      "write": 15
+    },
+    "gpt-4.1": {
+      "input": 2,
+      "output": 8,
+      "read": 0.5,
+      "write": 2,
+      "fast": 1.75
+    },
+    "gpt-4.1-mini": {
+      "input": 0.4,
+      "output": 1.6,
+      "read": 0.1,
+      "write": 0.4,
+      "fast": 1.75
+    },
+    "gpt-4o": {
+      "input": 2.5,
+      "output": 10,
+      "read": 1.25,
+      "write": 2.5,
+      "fast": 1.7
+    },
+    "gpt-4o-mini": {
+      "input": 0.15,
+      "output": 0.6,
+      "read": 0.075,
+      "write": 0.15,
+      "fast": 1.67
+    },
+    "o3-pro": {
+      "input": 20,
+      "output": 80,
+      "read": 20,
+      "write": 20
+    },
+    "o3": {
+      "input": 2,
+      "output": 8,
+      "read": 0.5,
+      "write": 2,
+      "fast": 1.75
+    },
+    "gpt-6-cyber": {
+      "input": 20,
+      "output": 100,
+      "read": 2,
+      "write": 25
+    },
+    "gpt-5.6-cyber": {
+      "input": 12.5,
+      "output": 75,
+      "read": 1.25,
+      "write": 15.625
+    },
+    "gpt-5.5-cyber-preview": {
+      "input": 12.5,
+      "output": 75,
+      "read": 1.25,
+      "write": 12.5
+    },
+    "gpt-6-rosalind": {
+      "input": 15,
+      "output": 75,
+      "read": 1.5,
+      "write": 18.75
+    },
+    "gpt-rosalind-research": {
+      "input": 5,
+      "output": 25,
+      "read": 0.5,
+      "write": 5
+    },
+    "gpt-rosalind-discovery": {
+      "input": 5,
+      "output": 25,
+      "read": 0.5,
+      "write": 5
+    },
+    "gpt-6-astra-law": {
+      "input": 10,
+      "output": 50,
+      "read": 1,
+      "write": 10
+    },
+    "chat-latest": {
+      "input": 5,
+      "output": 30,
+      "read": 0.5,
+      "write": 5
+    },
+    "gpt-5.3-codex": {
+      "input": 1.75,
+      "output": 14,
+      "read": 0.175,
+      "write": 1.75,
+      "fast": 2
+    },
+    "gpt-5-search-api": {
+      "input": 1.25,
+      "output": 10,
+      "read": 0.125,
+      "write": 1.25
+    }
+  }
+}

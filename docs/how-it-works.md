@@ -12,7 +12,8 @@ agent belongs to the worktree its working directory is in.
 ## Where it looks
 
 Nothing has to be installed into a project. Every two seconds it reads the
-transcripts below; the process list is taken every six seconds.
+transcripts below; the process list is taken every six seconds. The only
+network request is the daily read of the pricing pages (see Cost).
 
 - **Processes.** On Linux, `/proc` gives every `claude` and `codex` process and
   its working directory without starting anything. Elsewhere, one `ps` lists
@@ -54,6 +55,44 @@ parent. Unknown agents without a process leave it after fifteen minutes.
 Model and effort come from the transcript, which follows `/model` changes; the
 `claude-` prefix is dropped. They are shown as `model/effort`, or `unknown`, and
 never guessed from a process.
+
+## Cost
+
+Each agent's figure is what the tokens its own transcript records would cost at
+API list prices, in US dollars. It is an estimate of the API price, not a bill.
+
+- **Claude Code**: every reply's `usage` — input, cache writes (5-minute and
+  1-hour, each at its own price), cache reads and output — at the price of the
+  model that reply names, so a `/model` switch is followed. Claude Code repeats a
+  reply's usage on every content block; a reply is counted once, by its message
+  id. Fast mode (`speed: "fast"`), US-only inference (`inference_geo: "us"`,
+  1.1x) and Claude Haiku 5.5's higher prices for prompts over 100,000 tokens
+  are applied per reply.
+- **Codex**: the thread's running total (`token_count`), priced by the
+  difference between one total and the next at the model the thread was on;
+  cached input is subtracted from input and priced as cached. A forked thread
+  starts with its parent's total, so its first total counts only the response it
+  follows. The fast tier (`service_tier`) is priced at the page's fast rate.
+- A Claude subagent and a Codex subagent thread have transcripts of their own,
+  so a parent's figure does not include them; the `total` line adds up every
+  agent shown. A session forked or resumed into a new transcript carries the
+  replies it copied, and counts them again.
+
+Prices are matched by the exact model id (a date suffix, `[1m]` and provider
+prefixes aside), so a model with no known price is never priced as an older one
+whose id it starts with: its tokens are counted and marked `+` or `$?`.
+
+They come from the pricing pages,
+<https://platform.claude.com/docs/en/about-claude/pricing.md> and
+<https://developers.openai.com/api/docs/pricing.md>. A release ships the tables
+as they were when it was cut (`lib/prices.json`, written by `npm run prices`).
+The live view reads both pages again when the copy in
+`~/.agent-monitor/prices.json` is a day old, in the background, and uses what it
+finds from the next refresh on. A page that no longer reads as a pricing table
+is ignored and the last good prices stay. `--json` never goes to the network;
+`AGENT_MONITOR_PRICE_LOOKUP=0` keeps the live view off it too. Long-context
+surcharges on OpenAI models (over 272K tokens) are not applied; Codex compacts
+before that.
 
 A Claude subagent whose first prompt assigns it exactly one worktree of the
 repository (`Worktree: …`, `EnterWorktree with path=…`, `git worktree add …`,

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0] - 2026-11-12
+
+- Every session, subagent and Codex thread shows what its transcript's tokens
+  would cost at API list prices, and a `total` line adds up what is shown.
+  Claude cache writes (5-minute and 1-hour), cache reads, fast mode, US-only
+  inference and Haiku 5.5's long-prompt prices are applied per reply; Codex is
+  priced from its running totals, without counting a forked thread's parent
+  again. `--json` adds the token counts behind each figure.
+- Prices come from Anthropic's and OpenAI's pricing pages. A release ships
+  them (`npm run prices`); the live view reads the pages again once a day in
+  the background and keeps the last good copy in `~/.agent-monitor/prices.json`.
+  `AGENT_MONITOR_PRICE_LOOKUP=0` turns that off.
+
 ## [0.2.3] - 2026-10-14
 
 - The process list is taken every six seconds instead of on every two-second

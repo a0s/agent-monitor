@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { installHooks, removeHooks, record, snapshot, render } from '../lib/agent-monitor.mjs'
+import { installHooks, removeHooks, record, snapshot, render, usePrices } from '../lib/agent-monitor.mjs'
 
 const usage = `usage: agent-monitor [folder] [--codex|--claude-code] [--json] [--short]
        agent-monitor --install-hooks [config-folder...]
@@ -13,6 +13,10 @@ Git repository (all of its worktrees) or folder you run it from, or in the
 folder named on the command line instead. Nothing has to be installed:
 sessions are read from local transcripts and processes, in ~/.claude*,
 ~/.codex*, $CLAUDE_CONFIG_DIR and $CODEX_HOME.
+
+Each agent's cost is its transcript's tokens at API list prices; the live view
+reads the providers' pricing pages once a day (AGENT_MONITOR_PRICE_LOOKUP=0
+turns that off).
 
 Hooks are optional. They record starts and stops as they happen, for a more
 exact status. A config folder is a Claude or Codex one: ~/.claude, a second
@@ -50,6 +54,8 @@ try {
       let stat; try { stat = statSync(cwd) } catch { throw Error(`no such folder: ${cwd}`) }
       if (!stat.isDirectory()) throw Error(`not a folder: ${cwd}`)
     }
+    // A one-off --json snapshot uses the prices on disk; only the live view goes looking.
+    usePrices(json ? { lookup: false } : undefined)
     const show = () => {
       const data = snapshot(cwd, only)
       if (json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n')

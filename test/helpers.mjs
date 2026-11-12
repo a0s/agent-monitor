@@ -8,6 +8,8 @@ export const root = new URL('..', import.meta.url).pathname
 process.env.HOME = mkdtempSync(join(tmpdir(), 'agent-monitor-home-'))
 // Hooks record here whatever HOME a test gives the tool.
 process.env.AGENT_MONITOR_HOME = mkdtempSync(join(tmpdir(), 'agent-monitor-state-'))
+// Tests price with the tables the release ships, never with whatever the pages say today.
+process.env.AGENT_MONITOR_PRICE_LOOKUP = '0'
 export const tool = name => join(root, 'bin', name)
 export function run(cmd, args = [], cwd = root, env = {}) {
   return spawnSync(cmd, args, { cwd, encoding: 'utf8', env: { ...process.env, ...env }, timeout: 10000 })
