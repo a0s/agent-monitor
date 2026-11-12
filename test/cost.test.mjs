@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { repo, run, cleanup, temp, tool } from './helpers.mjs'
 import { ANTHROPIC_PRICING_URL, OPENAI_PRICING_URL, claudeCost, claudePrice, codexCost, formatUsd, loadPrices, openaiPrice, parseAnthropicPricing, parseOpenAIPricing, refreshPrices } from '../lib/cost.mjs'
@@ -89,7 +89,7 @@ test('dollars are shown to the cent', () => {
   assert.equal(formatUsd(1234.5), '$1235')
 })
 
-test('each session and subagent shows what its own transcript cost, with a total', () => {
+test('a session shows its cost with every subagent it started, finished or not, and the total counts it once', () => {
   const main = repo(), home = temp()
   const events = join(process.env.AGENT_MONITOR_HOME, 'events.jsonl')
   const before = existsSync(events) ? readFileSync(events, 'utf8') : ''
@@ -101,6 +101,10 @@ test('each session and subagent shows what its own transcript cost, with a total
     const lines = rows => rows.map(row => JSON.stringify({ cwd, sessionId: 'lead', ...row })).join('\n') + '\n'
     writeFileSync(join(project, 'lead.jsonl'), lines([{ type: 'user', message: { role: 'user', content: 'go' } }, { type: 'assistant', message: { id: 'm1', model: 'claude-opus-5-5', stop_reason: 'tool_use', usage: { input_tokens: 1000000, output_tokens: 10000 } } }]))
     writeFileSync(join(subagents, 'agent-busy.jsonl'), lines([{ agentId: 'busy', type: 'user', message: { role: 'user', content: 'task' } }, { agentId: 'busy', type: 'assistant', message: { id: 'm2', model: 'claude-sonnet-5-5', stop_reason: 'tool_use', usage: { input_tokens: 500000, output_tokens: 0 } } }]))
+    // Finished two days ago: out of the view, still part of what the session cost.
+    const done = join(subagents, 'agent-done.jsonl')
+    writeFileSync(done, lines([{ agentId: 'done', type: 'user', message: { role: 'user', content: 'task' } }, { agentId: 'done', type: 'assistant', message: { id: 'm3', model: 'claude-haiku-5-5', stop_reason: 'end_turn', usage: { input_tokens: 0, output_tokens: 1000000 } } }]))
+    utimesSync(done, new Date(Date.now() - 2 * 86400000), new Date(Date.now() - 2 * 86400000))
     // With hooks, the session's own events stand in for its transcript; its cost still comes from it.
     appendFileSync(events, JSON.stringify({ at: Date.now() - 1000, event: 'SessionStart', cli: 'claude-code', cwd, payload: { session_id: 'lead', model: 'claude-opus-5-5' } }) + '\n')
     const env = process.env.HOME
@@ -109,12 +113,14 @@ test('each session and subagent shows what its own transcript cost, with a total
     try { data = snapshot(main, null, { processes: [{ pid: 7, command: 'claude', cwd }] }) } finally { process.env.HOME = env }
     const lead = data.worktrees[0].agents.find(node => node.id === 'lead')
     close(lead.cost.usd, 4.2)
+    close(lead.totalCost.usd, 4.2 + 1 + 0.5)
+    assert.deepEqual(lead.children.map(node => node.id), ['busy'])
     close(lead.children[0].cost.usd, 1)
     const output = render(data)
-    assert.match(output, /claude-code lead opus-5-5\/unknown \$4\.20\n/)
+    assert.match(output, /claude-code lead opus-5-5\/unknown \$5\.70 \(own \$4\.20\)\n/)
     assert.match(output, /claude-code busy sonnet-5-5\/unknown \$1\.00\n/)
-    assert.match(output, /total \$5\.20 at API list prices/)
-    assert.match(render(data, { short: true }), /\x1b\[0m claude opus-5-5\/unknown \$4\.20\n/)
+    assert.match(output, /total \$5\.70 at API list prices/)
+    assert.match(render(data, { short: true }), /\x1b\[0m claude opus-5-5\/unknown \$5\.70\n/)
     const json = JSON.parse(run(tool('agent-monitor'), ['--json', '--claude-code'], main, { HOME: home }).stdout)
     assert.deepEqual(json.worktrees[0].agents.find(node => node.id === 'lead').cost.tokens, { input: 1000000, cacheWrite: 0, cacheRead: 0, output: 10000 })
   } finally { writeFileSync(events, before); cleanup(home, main) }
@@ -286,4 +292,22 @@ test('new prices reprice a transcript that has not changed', async () => {
     loadPrices(reset)
     cleanup(home, main, dir)
   }
+})
+
+test('a transcript touched without anything said in it does not take a running process from the live session', () => {
+  const main = repo(), home = temp()
+  try {
+    const project = join(home, '.claude', 'projects', 'p')
+    mkdirSync(project, { recursive: true })
+    const cwd = realpathSync(main)
+    const row = (id, at) => JSON.stringify({ cwd, sessionId: id, timestamp: new Date(at).toISOString(), type: 'assistant', message: { id: `m-${id}`, model: 'claude-opus-5-5', usage: { input_tokens: 1000 } } }) + '\n'
+    writeFileSync(join(project, 'live.jsonl'), row('live', Date.now() - 60000))
+    // Last said something three weeks ago, but its file was written to a second ago.
+    writeFileSync(join(project, 'old.jsonl'), row('old', Date.now() - 21 * 86400000))
+    const env = process.env.HOME
+    process.env.HOME = home
+    let data
+    try { data = snapshot(main, null, { processes: [{ pid: 7, command: 'claude', cwd }] }) } finally { process.env.HOME = env }
+    assert.deepEqual(data.worktrees[0].agents.map(node => [node.id, node.status]), [['live', 'running']])
+  } finally { cleanup(home, main) }
 })

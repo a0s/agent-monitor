@@ -40,7 +40,10 @@ been written since the last one.
 
 ## Status
 
-- `●` green: running. A session is running while its process is. A subagent is
+- `●` green: running. A session is running while its process is; a process is
+  matched to the session in its folder that last recorded something, by the
+  time on the transcript's newest row rather than the file's mtime, which
+  changes when a file is touched without anything being said in it. A subagent is
   running while it has not finished, was active in the last fifteen minutes,
   and its top-level session is running.
 - `○` dim: stopped. A Claude subagent has stopped when its last turn ended
@@ -73,10 +76,17 @@ API list prices, in US dollars. It is an estimate of the API price, not a bill.
   cached input is subtracted from input and priced as cached. A forked thread
   starts with its parent's total, so its first total counts only the response it
   follows. The fast tier (`service_tier`) is priced at the page's fast rate.
-- A Claude subagent and a Codex subagent thread have transcripts of their own,
-  so a parent's figure does not include them; the `total` line adds up every
-  agent shown. A session forked or resumed into a new transcript carries the
-  replies it copied, and counts them again.
+- A Claude subagent and a Codex subagent thread have transcripts of their own.
+  A session's figure adds every subagent it started — all of a Claude session's
+  `subagents/` transcripts, however old, and every Codex thread under it seen
+  in the last day — with its own share in brackets; finished subagents leave
+  the view but stay in that figure, which is what the session's CLI reports as
+  its cost. The `total` line adds up the sessions shown, each once. A session
+  forked or resumed into a new transcript carries the replies it copied, and
+  counts them again.
+- Claude Code's status line (`cost.total_cost_usd`) prices cache reads on Claude
+  Opus 5.5 and Sonnet 5.5 at 0.1x of input, where Anthropic's pricing page says
+  0.05x, so on a cache-heavy session it shows about a quarter more.
 
 Prices are matched by the exact model id (a date suffix, `[1m]` and provider
 prefixes aside), so a model with no known price is never priced as an older one

@@ -10,13 +10,13 @@ project root and leave it there.
 
 ```
 /Users/me/src/shop
-  ● claude-code 047e616b opus-5-5/high $3.42
+  ● claude-code 047e616b opus-5-5/high $5.84 (own $3.42)
     ● claude-code a7f0561e sonnet-5-5/medium $0.87 — Implement checkout endpoint
     /Users/me/src/shop/.claude/worktrees/wp-2
       ● claude-code b19c02e4 sonnet-5-5/medium $0.31 — Payment webhook
-  ● codex 01a0bf0c gpt-5.6-terra/high $1.12
+  ● codex 01a0bf0c gpt-5.6-terra/high $1.52 (own $1.12)
     ● codex 01a0d0e0 gpt-5.6-terra/high $0.40 — Boyle (/root/g03_repair)
-total $6.12 at API list prices
+total $7.36 at API list prices
 ```
 
 Nothing is installed into the project. It reads the agents' own transcripts
@@ -62,12 +62,15 @@ it.
 `--short` fits a narrow terminal: each line is cut down to the status mark,
 owner (`claude` or `codex`), model/effort and cost, dropping ids and titles.
 
-The dollar figure is what the tokens in that agent's own transcript would cost
-at the providers' API list prices — cache writes and reads, fast mode and
-Haiku's long-prompt tier included — not what a subscription bills. A subagent
-is counted on its own line, not in its parent's; the last line adds up what is
-shown. `$1.20+` means some tokens were on a model with no known price, `$?` that
-none had one. Prices ship with each release and the live view reads them again
+The dollar figure is what an agent's tokens would cost at the providers' API
+list prices — cache writes and reads, fast mode and Haiku's long-prompt tier
+included — not what a subscription bills. A session's figure includes every
+subagent it started, finished ones too, with its own share in brackets; a
+subagent's line is its own share. The last line adds up the sessions shown.
+`$1.20+` means some tokens were on a model with no known price, `$?` that none
+had one. Claude Code's own status line usually shows more for the same session:
+it prices cache reads on Opus 5.5 and Sonnet 5.5 at 0.1x of input, where
+Anthropic's pricing page now says 0.05x. Prices ship with each release and the live view reads them again
 from Anthropic's and OpenAI's pricing pages once a day, in the background, so a
 new model or price change does not wait for an upgrade;
 `AGENT_MONITOR_PRICE_LOOKUP=0` keeps it off the network. `--json` gives the

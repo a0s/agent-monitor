@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1] - 2026-11-13
+
+- A session's cost includes every subagent it started, finished ones too, with
+  its own share in brackets (`$71.89 (own $33.75)`): the figure its CLI reports
+  for the session. `--short` shows the session's figure only, `--json` has it
+  as `totalCost`, and the `total` line counts each session once.
+- A transcript whose file was touched without anything new in it no longer
+  takes the running process from the live session in that folder: activity is
+  read from the transcript's newest row, not the file's mtime. Before, a
+  weeks-old session could show as running, with its cost in the total.
+- The README says why Claude Code's status line shows more for the same session.
+
 ## [0.3.0] - 2026-11-12
 
 - Every session, subagent and Codex thread shows what its transcript's tokens
